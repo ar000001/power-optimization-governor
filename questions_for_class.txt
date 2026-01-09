@@ -1,0 +1,7 @@
+What are the command line arguments:
+-- total-cores=6
+-- target=NEON 
+used for?
+
+Will we have to optimize them as well?
+
