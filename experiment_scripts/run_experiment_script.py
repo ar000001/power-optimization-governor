@@ -1,63 +1,58 @@
 import os
 import argparse
-
+import matplotlib.pyplot as plt
 parser = argparse.ArgumentParser()
 parser.add_argument("--graph", type=str, required=True)
-parser.add_argument("--threads", type=int, required=True)
-parser.add_argument("--threads2", type=int, required=True)
-parser.add_argument("--target", type=str, required=True)
 parser.add_argument("--n_frames", type=int, required=True)
-parser.add_argument("--partition_point1", type=int, required=True)
-parser.add_argument("--partition_point2", type=int, required=True)
-parser.add_argument("--order", type=str, required=True)
-parser.add_argument("--cpu_freq", type=int, required=True)
-parser.add_argument("--cpu_type", type=str, required=True)
+# parser.add_argument("--partition_point1", type=int, required=False) # NOTE: Currently not used but maybe helpful in the future
+# parser.add_argument("--partition_point2", type=int, required=False)
+# parser.add_argument("--order", type=str, required=False)
+# parser.add_argument("--cpu_freq", type=int, required=False)
+# parser.add_argument("--cpu_type", type=str, required=False)
 
-little_freq_table=[500000, 667000, 1000000, 1200000, 1398000, 1512000, 1608000, 1704000, 1800000]
-big_freq_table=[500000, 667000, 1000000, 1200000, 1398000, 1512000, 1608000, 1704000, 1800000, 1908000, 2016000, 2100000, 2208000]
+LITTLE_FREQ_TABLE=[500000, 667000, 1000000, 1200000, 1398000, 1512000, 1608000, 1704000, 1800000]
+BIG_FREQ_TABLE=[500000, 667000, 1000000, 1200000, 1398000, 1512000, 1608000, 1704000, 1800000, 1908000, 2016000, 2100000, 2208000]
 
 args = parser.parse_args()
 
-if args.cpu_type == "little":
-    freq_table = little_freq_table
-elif args.cpu_type == "big":
-    freq_table = big_freq_table
-else:
-    raise ValueError("Invalid CPU type. Either 'little' or 'big'")
-
-if args.cpu_freq not in freq_table:
-    raise ValueError(f"Invalid CPU frequency. \nAvailable frequencies: {freq_table}")
-
 # setup system using shell scripts
-
-os.system(f"./set_cpu_freq.sh {args.cpu_type} {args.cpu_freq}")
 os.system(f"./set_fan.sh 1 0 1") # ./set_fan.sh <enable> <mode> <level>
+os.system(f"adb -d shell \"export LD_LIBRARY_PATH=/data/local/Working_dir\"")
 
 
-def run_experiment():
+def run_littlecpufreq_experiment():
+
+    print(" --- LittleCPU Experiment ---")
+
+    # Basically only LittleCPU
+    partition_point1 = partition_point2 = 8
+    order = "L-G-B"
 
     watts_read = []
 
-    for little_freq in little_freq_table:
-        for big_freq in big_freq_table:
-            print(f"Running experiment with little freq: {little_freq}, big freq: {big_freq}")
-            os.system(f"./set_cpu_freq.sh little {little_freq}")
-            os.system(f"./set_cpu_freq.sh big {big_freq}")        
+    for little_freq in LITTLE_FREQ_TABLE:
+        print(f"Setting little freq: {little_freq}")
+        os.system(f"./set_freq.sh little {little_freq}")
+        
+        inference_command = f"./run_inference.sh {args.graph} {args.n_frames} {partition_point1} {partition_point2} {order}"
 
-            inference_command = "./run_inference.sh {graph} {n_frames} {threads} {threads2} {order}".format(
-                graph=args.graph,
-                n_frames=args.n_frames,
-                threads=args.threads,
-                threads2=args.threads2,
-                order=args.order
-            )
+        os.system(inference_command)
 
-            os.system(inference_command)
-
-            read_watts = input("What was the max watts you read from the power meter? ")
-            watts_read.append(float(read_watts))
-            print(f"Max watts: {read_watts}")
+        read_watts = input("What was the max watts you read from the power meter? ")
+        watts_read.append((little_freq, float(read_watts)))
+        
+    print(" --- End of LittleCPU ---")
+    print(watts_read)
 
     return watts_read
 
-run_experiment()
+
+data = run_littlecpufreq_experiment()
+
+# write data to text file
+with open("littlecpufreq_experiment.txt", "w") as f:
+    for item in data:
+        f.write(f"{item[0]} {item[1]}\n")
+
+plt.plot(data)
+plt.show()
