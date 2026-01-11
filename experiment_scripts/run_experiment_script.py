@@ -56,3 +56,5 @@ with open("littlecpufreq_experiment.txt", "w") as f:
 
 plt.plot(data)
 plt.show()
+
+os.system("./set_fan.sh 1 0 0") # turn fan off again
