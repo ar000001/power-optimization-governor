@@ -8,3 +8,5 @@ Will we have to optimize them as well?
 What is the best metric to track the power? We tried max power, but it does seem to peak differently. Almost as it peaks higher on low frequencies.
 And is steady but lower on high frequencies. Is average power better?
 
+Is bigCPU at frequency 500000 the same as littleCPU at frequency 500000? 
+
