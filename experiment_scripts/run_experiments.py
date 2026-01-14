@@ -17,11 +17,12 @@ BIG_FREQ_SHORT    = [500000, 1000000, 1512000, 1800000, 2208000]
 
 ALEXNET_TOTALPARTS = 8 
 
+DATA_PATH = "data/"
+
 
 def setup_board_once():
     os.system("./set_fan.sh 1 0 1")
     os.system("adb -d root")
-    os.system("adb -d shell \"export LD_LIBRARY_PATH=/data/local/Working_dir\"")
 
 
 def parse_last_run_output(output_path="last_run_output.txt"):
@@ -60,7 +61,7 @@ def run_one(graph, n_frames, pp1, pp2, order):
 
 
 def save_results(filename, header_lines, rows):
-    with open(filename, "w") as f:
+    with open(DATA_PATH+filename, "w") as f:
         for line in header_lines:
             f.write(line + "\n")
         f.write("big_freq,little_freq,pp1,pp2,order,fps,latency,watts\n")
