@@ -1,0 +1,103 @@
+=== EXP4: Partition points sweep ===
+adbd is already running as root
+adbd is already running as root
+pp1=2 pp2=4 order=B-L-G
+adbd is already running as root
+
+Running Inference ... 
+
+stage1_input_time: 0.0025473 ms
+stage1_inference_time: 61.7876 ms
+stage1_total_time: 61.7902 ms
+
+
+stage2_input_time: 0.900173 ms
+stage2_inference_time: 62.8107 ms
+stage2_total_time: 63.7109 ms
+
+
+stage3_input_time: 0.344256 ms
+stage3_inference_time: 68.9893 ms
+stage3_total_time: 69.3335 ms
+/data/local/Working_dir/last_run_output.txt: 1 file pulled, 0 skipped. 0.0 MB/s (637 bytes in 0.046s)
+Average watts from power meter? 4.56
+pp1=3 pp2=5 order=B-L-G
+adbd is already running as root
+
+Running Inference ... 
+
+stage1_input_time: 0.00125065 ms
+stage1_inference_time: 66.6634 ms
+stage1_total_time: 66.6646 ms
+
+
+stage2_input_time: 12.9206 ms
+stage2_inference_time: 53.6276 ms
+stage2_total_time: 66.5482 ms
+
+
+stage3_input_time: 3.23209 ms
+stage3_inference_time: 63.8582 ms
+stage3_total_time: 67.0903 ms
+/data/local/Working_dir/last_run_output.txt: 1 file pulled, 0 skipped. 0.0 MB/s (638 bytes in 0.045s)
+Average watts from power meter? 4.66
+pp1=4 pp2=6 order=B-L-G
+adbd is already running as root
+
+Running Inference ... 
+
+stage1_input_time: 0.00123122 ms
+stage1_inference_time: 48.6809 ms
+stage1_total_time: 48.6822 ms
+
+
+stage2_input_time: 0.161591 ms
+stage2_inference_time: 106.878 ms
+stage2_total_time: 107.039 ms
+
+
+stage3_input_time: 70.2226 ms
+stage3_inference_time: 35.6081 ms
+stage3_total_time: 105.831 ms
+/data/local/Working_dir/last_run_output.txt: 1 file pulled, 0 skipped. 0.1 MB/s (638 bytes in 0.005s)
+Average watts from power meter? 4.29
+pp1=5 pp2=7 order=B-L-G
+adbd is already running as root
+
+Running Inference ... 
+
+stage1_input_time: 0.00112297 ms
+stage1_inference_time: 48.8751 ms
+stage1_total_time: 48.8763 ms
+
+
+stage2_input_time: 0.0333952 ms
+stage2_inference_time: 122.093 ms
+stage2_total_time: 122.126 ms
+
+
+stage3_input_time: 102.467 ms
+stage3_inference_time: 17.7158 ms
+stage3_total_time: 120.183 ms
+/data/local/Working_dir/last_run_output.txt: 1 file pulled, 0 skipped. 0.1 MB/s (638 bytes in 0.005s)
+Average watts from power meter? 3.49
+pp1=6 pp2=8 order=B-L-G
+adbd is already running as root
+
+
+stage3_input_time: 0 ms
+stage3_inference_time: 0 ms
+stage3_total_time: 0 ms
+
+Running Inference ... 
+
+stage1_input_time: 0.00123058 ms
+stage1_inference_time: 95.3304 ms
+stage1_total_time: 95.3316 ms
+
+
+stage2_input_time: 44.5118 ms
+stage2_inference_time: 49.9877 ms
+stage2_total_time: 94.4995 ms
+/data/local/Working_dir/last_run_output.txt: 1 file pulled, 0 skipped. 0.1 MB/s (638 bytes in 0.005s)
+Average watts from power meter? 3.76
