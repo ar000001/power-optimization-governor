@@ -143,7 +143,7 @@ def exp4_partition_points():
     os.system(f"./set_freq.sh big {fixed_big}")
     os.system(f"./set_freq.sh little {fixed_little}")
 
-    fixed_order = "B-L-G"
+    fixed_order = "G-B-L"
 
     candidates = [(2,4), (3,5), (4,6), (5,7), (6,8)]
 
@@ -167,7 +167,7 @@ def exp5_component_orders():
     os.system(f"./set_freq.sh big {fixed_big}")
     os.system(f"./set_freq.sh little {fixed_little}")
 
-    fixed_pp1 = 4
+    fixed_pp1 = 3
     fixed_pp2 = 6
 
     orders = ["B-L-G", "B-G-L", "L-B-G", "L-G-B", "G-B-L", "G-L-B"]
@@ -189,8 +189,8 @@ if __name__ == "__main__":
 
 #    f1 = exp1_little_cpu()
 #    f2 = exp2_big_cpu()
-    f3 = exp3_gpu_cpu_freq_grid()
-    f4 = exp4_partition_points()
+#    f3 = exp3_gpu_cpu_freq_grid()
+#    f4 = exp4_partition_points()
     f5 = exp5_component_orders()
 
     os.system("./set_fan.sh 1 0 0")
