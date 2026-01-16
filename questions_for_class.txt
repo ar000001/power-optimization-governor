@@ -1,17 +1,16 @@
 What are the command line arguments:
 -- total-cores=6
+-- threads2=2
 -- target=NEON 
 used for?
 
-Will we have to optimize them as well?
+Will we have to optimize them as well? 
+In the inference output there are options like "Fast Math enabled", "Tuner enables" and other... Should we use them?
 
 What is the best metric to track the power? We tried max power, but it does seem to peak differently. Almost as it peaks higher on low frequencies.
-And is steady but lower on high frequencies. Is average power better?
-
-Is bigCPU at frequency 500000 the same as littleCPU at frequency 500000? 
+And is steady but lower on high frequencies. Is average power better? Average power should be measured "manually"?
 
 What are good values and what are bad values for power consumption?
 
-How should we desing experiment 3)? Should we run it entirely on the gpu and still change cpus frequencies? Can we expect a change in inference time
-if the cpus' frequencies change but they are not in the pipeline? 
+How should we desing experiment 3)? Should we run it entirely on the gpu and still change cpus frequencies? Can we expect a change in inference time if the cpus' frequencies change but they are not in the pipeline?  WHICH OF THE CPUS IS THE CONTROLLER AND HOW MUCH IMPACT DOES IT HAVE.
 I.e. -order="G-B-L" -pp=8 -pp2=8 with low frequencies and -order="G-B-L" -pp=8 -pp2=8 with high frequencies
