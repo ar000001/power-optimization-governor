@@ -56,7 +56,11 @@ def parse_last_run_output(output_path="last_run_output.txt"):
 def run_one(graph, n_frames, pp1, pp2, order):
     os.system(f"./run_inference.sh {graph} {n_frames} {pp1} {pp2} {order}")
     fps, lat = parse_last_run_output("last_run_output.txt")
-    watts = float(input("Average watts from power meter? "))
+    elapsed_time_ms = float(input("Elapsed time of measurement (ms)? "))
+    mwh = float(input("Recorded energy (mWh)? "))
+    elapsed_time_s = (elapsed_time_ms * n_frames) / 1000.0
+    watts = (mwh / 1000.0) / (elapsed_time_s / 3600.0)
+    print(f"Calculated power: {watts:.2f} W")
     return fps, lat, watts
 
 
@@ -187,10 +191,10 @@ def exp5_component_orders():
 if __name__ == "__main__":
     setup_board_once()
 
-#    f1 = exp1_little_cpu()
-#    f2 = exp2_big_cpu()
-#    f3 = exp3_gpu_cpu_freq_grid()
-#    f4 = exp4_partition_points()
+    f1 = exp1_little_cpu()
+    f2 = exp2_big_cpu()
+    f3 = exp3_gpu_cpu_freq_grid()
+    f4 = exp4_partition_points()
     f5 = exp5_component_orders()
 
     os.system("./set_fan.sh 1 0 0")
