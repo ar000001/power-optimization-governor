@@ -149,7 +149,16 @@ def exp4_partition_points():
 
     fixed_order = "G-B-L"
 
-    candidates = [(2,4), (3,5), (4,6), (5,7), (6,8)]
+    # NOTE: The idea here is that the little cpu is fixed on the last layer, bc
+    # it is small and therefore will most probably always only handle the last layer.
+    # The more important part is to see how the big cpu handles the different partition points.
+    # And more or less the tradeoffs between bigCPU and GPU.
+    big_pp = 7
+    little_pp = 7
+    candidates = []
+    
+    for big_pp in range(1, 7):
+        candidates.append((big_pp, little_pp))
 
     rows = []
     for pp1, pp2 in candidates:
@@ -191,12 +200,12 @@ def exp5_component_orders():
 if __name__ == "__main__":
     setup_board_once()
 
-    f1 = exp1_little_cpu()
-    f2 = exp2_big_cpu()
+    #f1 = exp1_little_cpu()
+    #f2 = exp2_big_cpu()
     f3 = exp3_gpu_cpu_freq_grid()
-    f4 = exp4_partition_points()
-    f5 = exp5_component_orders()
+    #f4 = exp4_partition_points()
+    #f5 = exp5_component_orders()
 
     os.system("./set_fan.sh 1 0 0")
     print("DONE. Generated files:")
-    print(f3, f4, f5)
+    print(f3)
