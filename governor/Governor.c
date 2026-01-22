@@ -156,30 +156,57 @@ bool conditions_met(stats_t *s, float target_fps, float target_latency) {
 }
 
 
-float fx_freq_power_little_cpu(float khz){      
+float fx_freq_power_lcpu(float khz){      
 	return 4.827e-14 * pow(khz, 2) + 2.292e-7 * khz + 1.855;
 }
 
-float fx_freq_power_big_cpu(float khz){      
+float fx_freq_power_bcpu(float khz){      
 	return 6.998e-13 * pow(khz, 2) - 7.705e-7 * khz + 2.523;
 }
 
-float fx_freq_latency_little_cpu(float khz){
+float fx_freq_latency_lcpu(float khz){
     float ghz = khz / 1e6;
 	return -1.951e+01 * exp(-1.412e+02 * ghz) + 521.364;
 }
 
-float fx_freq_latency_big_cpu(float khz){
+float fx_freq_latency_bcpu(float khz){
 	float ghz = khz / 1e6;
 	return 8.573e+02 * exp(-2.059e+00 * ghz) + 100.429;
 }
 
-float fx_freq_fps_little_cpu(float khz){
+float fx_freq_fps_lcpu(float khz){
     float ghz = khz / 1e6;
 	return 6.027e+03 * exp(1.836e-04 * ghz) + -6026.159;
 }
 
-float fx_freq_fps_big_cpu(float khz){
+float fx_freq_fps_bcpu(float khz){
 	float ghz = khz / 1e6;
 	return 3.016e+04 * exp(1.385e-04 * ghz) + -30158.352;
 }
+
+float fx_power_freq_lcpu(float watts){
+	return -1.74e+06 * (watts*watts) + 1.042e+07 * watts - 1.329e+07;
+}
+
+float fx_power_freq_bcpu(float watts){
+	return -3.409e+05 * (watts*watts) + 2.991e+06 * watts - 4.385e+06;
+}
+
+float fx_latency_freq_lcpu(float latency){
+	return 7.828e+07 * exp(-1.052e+04 * x_GHz) + 561899.921;
+}
+
+float fx_latency_freq_bcpu(float latency){
+	return 6.359e+06 * exp(-1.289e+04 * x_GHz) + 514867.777;
+}
+
+float fx_fps_freq_lcpu(float fps){
+	return 1.654e+04 * exp(1.745e+06 * x_GHz) + 437989.902;
+}
+
+float fx_fps_freq_bcpu(float fps){
+	return 2.469e+06 * exp(6.474e+04 * x_GHz) + -2380643.071;
+}
+
+
+
