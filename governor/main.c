@@ -38,6 +38,7 @@ int main (int argc, char *argv[]) {
 	short fps_condition=0;
 
 	PipelineConfig config = ROOT_CONFIG;
+    Policy policy = {false, false, -100, 1};
 
 	char command[100];
 
@@ -53,9 +54,9 @@ int main (int argc, char *argv[]) {
 	stats_t stats;
 
 	while(1){
-		run_inference(&config, graph, partitions);
+		run_inference(&config, graph, 60);
 		parse_results(&stats);
-		apply_policy(&config, &stats, target_fps, target_latency);
+		apply_policy(&policy,&config, &stats, target_fps, target_latency);
 		if (conditions_met(&stats, target_fps, target_latency) == 0){
 			//NOTE: might be changed later on, such that if a config is found, it
 			// still continues to try to find a better config.
