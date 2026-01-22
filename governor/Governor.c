@@ -8,27 +8,53 @@ On the Board:
 */
 
 
-#include <stdio.h>      /* printf */
-#include <stdlib.h>     /* system, NULL, EXIT_FAILURE */
+#include <stdio.h>      
+#include <stdlib.h>     
+#include <stdbool.h>
 #include "PipelineConfig.h"
 
-float stage_one_inference_time=0;
-float stage_two_inference_time=0;
-float stage_three_inference_time=0;
+// This config is a very well performing config.
+// From this config on, we will try to find a better config, by tweaking values slightly.
+PipelineConfig ROOT_CONFIG = {4, 6, 1800000, 1200000, "G-B-L"};
 
-int partitions=0;
-int target_fps=0;
-int target_latency=0;
+typedef struct {
+	float latency;
+	float fps;
+	float stage1_inference_time;
+	float stage2_inference_time;
+	float stage3_inference_time;
+} stats_t;
 
+typedef struct {
+	bool last_increased_bigCPU;
+	PipelineConfig *best_config;
+	float best_bigCPU_freq;
+	float best_littleCPU_freq;
+} Policy;
+
+
+void apply_policy(Policy *policy, PipelineConfig *config, stats_t *stats, float target_fps, float target_latency){
+
+	float latency_diff = stats->latency - target_latency;
+	float fps_diff = stats->fps - target_fps;
+
+	if (latency_diff < 0){
+		if (policy->last_increased_bigCPU){
+			
+		}
+	}
+
+}
 
 
 /* Get feedback by parsing the results */
-void parse_results(){
+void parse_results(stats_t *ret){
 	float fps;
 	float latency;
 	FILE *output_file;
     char *line = NULL;
     size_t len = 0;
+    stats_t stats;
     
     if ((output_file = fopen("output.txt", "r")) == NULL) {
 		printf("Error opening file\n");
@@ -41,11 +67,12 @@ void parse_results(){
 		char temp[100];
 		/* Extract Frame Rate */
 		if ( strstr(line, "Frame rate is:")!=NULL ){
-			//cout<<"line is: "<<line<<std::endl;
+
 			temp = strtok(line, " ");
 			while (temp != NULL) {
 				/* Checking the given word is float or not */
 				if (sscanf(temp, "%f", &fps) == 1){
+					ret->fps = fps;
 					printf("Throughput is: %f FPS\n", fps);
 					break;
 				}
@@ -54,11 +81,12 @@ void parse_results(){
 		}
 		/* Extract Frame Latency */
 		if ( strstr(line, "Frame latency is:")!=NULL ){
-			//cout<<"line is: "<<line<<std::endl;
+
 			temp = strtok(line, " ");
 			while (temp != NULL) {
 				/* Checking the given word is float or not */
 				if (sscanf(temp, "%f", &latency) == 1){
+					ret->latency = latency;
 					printf("Latency is: %f ms\n", latency);
 					break;
 				}
@@ -67,12 +95,12 @@ void parse_results(){
 		}
 		/* Extract Stage One Inference Time */
 		if ( strstr(line, "stage1_inference_time:")!=NULL ){
-			//cout<<"line is: "<<line<<std::endl;
+			
 			temp = strtok(line, " ");
 			while (temp != NULL) {
 				/* Checking the given word is float or not */
-				if (sscanf(temp, "%f", &stage_one_inference_time) == 1){
-					//printf("StageOneInferenceTime is: %f ms\n", StageOneInferenceTime);
+				if (sscanf(temp, "%f", &stage1_inference_time) == 1){
+					ret->stage1_inference_time = stage1_inference_time;
 					break;
 				}
 				temp = strtok(NULL, " ");
@@ -83,8 +111,8 @@ void parse_results(){
 			temp = strtok(line, " ");
 			while (temp != NULL) {
 				/* Checking the given word is float or not */
-				if (sscanf(temp, "%f", &stage_two_inference_time) == 1){
-					//printf("StageTwoInferenceTime is: %f ms\n", StageTwoInferenceTime);
+				if (sscanf(temp, "%f", &stage2_inference_time) == 1){
+					ret->stage2_inference_time = stage2_inference_time;
 					break;
 				}
 				temp = strtok(NULL, " ");
@@ -95,8 +123,8 @@ void parse_results(){
             temp = strtok(line, " ");
 			while (temp != NULL) {
 				/* Checking the given word is float or not */
-				if (sscanf(temp, "%f", &stage_three_inference_time) == 1){
-					//printf("StageThreeInferenceTime is: %f ms\n", StageThreeInferenceTime);
+				if (sscanf(temp, "%f", &stage3_inference_time) == 1){
+					ret->stage3_inference_time = stage3_inference_time;
 					break;
 				}
 				temp = strtok(NULL, " ");
@@ -104,114 +132,19 @@ void parse_results(){
 		}
 	}
 	/* Check Throughput and Latency Constraints */
-	if ( Latency <= Target_Latency ){
-		LatencyCondition=1; //Latency requirement was met.
+	if ( latency <= target_latency ){
+		latency_condition=1; //Latency requirement was met.
 	}
-	if ( FPS >= Target_FPS ){
-		FPSCondition=1; //FPS requirement was met.
+	if ( fps >= target_fps ){
+		fps_condition=1; //FPS requirement was met.
 	}
 }
 
 
-void set_system_config(){
-	/* Export OpenCL library path */
-    system("export LD_LIBRARY_PATH=/data/local/Working_dir");
-	setenv("LD_LIBRARY_PATH","/data/local/Working_dir",1);
+bool conditions_met(stats_t *s, float target_fps, float target_latency) {
 
-	/* Setup Performance Governor (CPU) */
-	system("echo performance > /sys/devices/system/cpu/cpufreq/policy0/scaling_governor");
-	system("echo performance > /sys/devices/system/cpu/cpufreq/policy2/scaling_governor");
-
-}
-
-
-int main (int argc, char *argv[])
-{
-	if ( argc < 5 ){
-		printf("Wrong number of input arguments.\n");
-		return -1;
+	if (s->latency <= target_latency && s->fps >= target_fps){
+		return true;
 	}
-
-    char graph[100];
-	sscanf(argv[1], "%s", graph);
-	partitions=atoi(argv[2]);
-	target_fps=atoi(argv[3]);
-	target_latency=atoi(argv[4]);
-
-	char command[100];
-
-	/* Checking if processor is available */
-	if (system(NULL)) {
-        puts ("Ok");
-    } else {
-        exit (EXIT_FAILURE);
-    }
-
-    set_system_config();
-	/* Initialize Little and Big CPU with Lowest Frequency */
-
-
-	int N_Frames=10;
-	/* Start with running half network on Little CPU and half network on Big CPU with GPU empty in the middle */
-	int PartitionPoint1=partitions/2;
-	int PartitionPoint2=partitions/2;
-	string Order="L-G-B";
-    
-	while(true){
-		char Run_Command[150];		
-		sprintf(Run_Command, "./%s --threads=4 --threads2=2 --target=NEON --n=%d --partition_point=%d --partition_point2=%d --order=%s > output.txt 2>&1",
-        graph, N_Frames, PartitionPoint1, PartitionPoint2, Order.c_str());
-		system(Run_Command);
-		ParseResults();
-		if ( FPSCondition && LatencyCondition ){//Both Latency and Throughput Requirements are Met.
-			printf("Solution Was Found.\n TargetBigFrequency:%d \t TargetLittleFrequency:%d \t PartitionPoint1:%d \t PartitionPoint2:%d \t Order:%s\n", 
-			BigFrequencyTable[BigFrequencyCounter],LittleFrequencyTable[LittleFrequencyCounter], PartitionPoint1, PartitionPoint2, Order.c_str());
-			break;	
-		}
-
-		printf("Target Perfromance Not Satisfied\n\n");
-
-		if ( LittleFrequencyCounter < MaxLittleFrequencyCounter ){
-			/* Push Frequency of Little Cluster Higher to Meet Target Performance */
-			LittleFrequencyCounter=LittleFrequencyCounter+1;
-			Command="echo " + to_string(LittleFrequencyTable[LittleFrequencyCounter]) + " > /sys/devices/system/cpu/cpufreq/policy0/scaling_max_freq";
-			system(Command.c_str());
-			printf("Increasing Frequency of Little Cores to %d\n", LittleFrequencyTable[LittleFrequencyCounter]);
-		}
-		else{
-			if ( BigFrequencyCounter < MaxBigFrequencyCounter ){
-				/* Push Frequency of Small Cluster Higher to Meet Target Performance */
-				BigFrequencyCounter=BigFrequencyCounter+1;
-				Command="echo " + to_string(BigFrequencyTable[BigFrequencyCounter]) + " > /sys/devices/system/cpu/cpufreq/policy2/scaling_max_freq";
-				system(Command.c_str());
-				printf("Increasing Frequency of Big Cores to %d\n", BigFrequencyTable[BigFrequencyCounter]);
-			}
-			else{
-				if ( StageOneInferenceTime < StageThreeInferenceTime ){
-					if ( PartitionPoint2 < partitions ){
-						/* Push Layers from Third Stage (Big CPU) to GPU to Meet Target Performance */
-						PartitionPoint2=PartitionPoint2+1;
-						printf("Reducing the Size of Pipeline Partition 3\n");
-					}
-					else{
-						printf("No Solution Found\n");
-						break;
-					}
-				}
-				else{
-					if ( PartitionPoint1 > 1 ){
-						/* Push Layers from First Stage (Little CPU) to GPU to Meet Target Performance */
-						PartitionPoint1=PartitionPoint1-1;
-						printf("Reducing the Size of Pipeline Partition 1\n");
-					}
-					else{
-						printf("No Solution Found\n");
-						break;
-					}
-				}
-			}
-		}
-	}
-  
-  return 0;
+	return false;
 }
