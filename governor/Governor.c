@@ -1,31 +1,70 @@
-/*Instructions to Run
-On Your Computer: 
-	arm-linux-androideabi-clang++ -static-libstdc++ Governor.cpp -o Governor 
-	adb push Governor /data/local/Working_dir
-On the Board: 
-	chmod +x Governor.sh
-	./Governor graph_alexnet_all_pipe_sync #NumberOFPartitions #TargetFPS #TargetLatency
-*/
-
-
-#include <stdio.h>      /* printf */
-#include <stdlib.h>     /* system, NULL, EXIT_FAILURE */
+#include <stdio.h>      
+#include <stdlib.h>     
+#include <stdbool.h>
+#include <math.h>
 #include "PipelineConfig.h"
 
-float stage_one_inference_time=0;
-float stage_two_inference_time=0;
-float stage_three_inference_time=0;
+// This config is a very well performing config.
+// From this config on, we will try to find a better config, by tweaking values slightly.
+PipelineConfig ROOT_CONFIG = {4, 6, 1800000, 1200000, "G-B-L"};
 
-int partitions=0;
-int target_fps=0;
-int target_latency=0;
+typedef struct {
+	float latency;
+	float fps;
+	float stage1_inference_time;
+	float stage2_inference_time;
+	float stage3_inference_time;
+} stats_t;
 
+typedef struct {
+	bool increase_bigCPU;
+	bool decrease_bigCPU;
+	float (*fx_freq_power_little_cpu)(float);
+	float (*fx_freq_power_big_cpu)(float);
+	float (*fx_freq_latency_little_cpu)(float);
+	float (*fx_freq_latency_big_cpu)(float);
+	float (*fx_freq_fps_little_cpu)(float);
+	float (*fx_freq_fps_big_cpu)(float);
+	float latency_margin;
+	float fps_margin;
+} Policy;
+
+
+void apply_policy(Policy *policy, PipelineConfig *config, stats_t *stats, float target_fps, float target_latency){
+
+	float latency_diff = stats->latency - target_latency;
+	float fps_diff = stats->fps - target_fps;
+
+	if (latency_diff > 0){ //target not met
+
+		if (policy->increase_bigCPU)
+			increment_frequency(config->big_frequency, BIG_CPU);
+		 else 
+			increment_frequency(config->little_frequency, LITTLE_CPU);
+
+		policy->increase_bigCPU = !policy->increase_bigCPU;
+		policy->decrease_bigCPU = false; //if there has been an increase, the next decrease must be of littleCPU
+
+	} else if (latency_diff  < policy->latency_margin) { //target met with margin
+		if (policy->decrease_bigCPU)
+			decrement_frequency(config->big_frequency, BIG_CPU);
+		 else 
+			decrement_frequency(config->little_frequency, LITTLE_CPU);
+
+		policy->decrease_bigCPU = !policy->decrease_bigCPU;
+
+	}
+
+}
 
 
 /* Get feedback by parsing the results */
-void parse_results(){
+void parse_results(stats_t *ret){
 	float fps;
 	float latency;
+	float stage1_inference_time;
+	float stage2_inference_time;
+	float stage3_inference_time;
 	FILE *output_file;
     char *line = NULL;
     size_t len = 0;
@@ -38,14 +77,15 @@ void parse_results(){
 	/* Read Output.txt File and Extract Data */
 	while (getline(&line, &len, output_file) != -1)
 	{
-		char temp[100];
+		char *temp;
 		/* Extract Frame Rate */
 		if ( strstr(line, "Frame rate is:")!=NULL ){
-			//cout<<"line is: "<<line<<std::endl;
+
 			temp = strtok(line, " ");
 			while (temp != NULL) {
 				/* Checking the given word is float or not */
 				if (sscanf(temp, "%f", &fps) == 1){
+					ret->fps = fps;
 					printf("Throughput is: %f FPS\n", fps);
 					break;
 				}
@@ -54,11 +94,12 @@ void parse_results(){
 		}
 		/* Extract Frame Latency */
 		if ( strstr(line, "Frame latency is:")!=NULL ){
-			//cout<<"line is: "<<line<<std::endl;
+
 			temp = strtok(line, " ");
 			while (temp != NULL) {
 				/* Checking the given word is float or not */
 				if (sscanf(temp, "%f", &latency) == 1){
+					ret->latency = latency;
 					printf("Latency is: %f ms\n", latency);
 					break;
 				}
@@ -67,24 +108,24 @@ void parse_results(){
 		}
 		/* Extract Stage One Inference Time */
 		if ( strstr(line, "stage1_inference_time:")!=NULL ){
-			//cout<<"line is: "<<line<<std::endl;
+			
 			temp = strtok(line, " ");
 			while (temp != NULL) {
 				/* Checking the given word is float or not */
-				if (sscanf(temp, "%f", &stage_one_inference_time) == 1){
-					//printf("StageOneInferenceTime is: %f ms\n", StageOneInferenceTime);
+				if (sscanf(temp, "%f", &stage1_inference_time) == 1){
+					ret->stage1_inference_time = stage1_inference_time;
 					break;
 				}
 				temp = strtok(NULL, " ");
 			}
 		}
 		/* Extract Stage Two Inference Time */
-		if ( strstr("stage2_inference_time:")!=NULL ){
+		if ( strstr(line, "stage2_inference_time:")!=NULL ){
 			temp = strtok(line, " ");
 			while (temp != NULL) {
 				/* Checking the given word is float or not */
-				if (sscanf(temp, "%f", &stage_two_inference_time) == 1){
-					//printf("StageTwoInferenceTime is: %f ms\n", StageTwoInferenceTime);
+				if (sscanf(temp, "%f", &stage2_inference_time) == 1){
+					ret->stage2_inference_time = stage2_inference_time;
 					break;
 				}
 				temp = strtok(NULL, " ");
@@ -95,123 +136,77 @@ void parse_results(){
             temp = strtok(line, " ");
 			while (temp != NULL) {
 				/* Checking the given word is float or not */
-				if (sscanf(temp, "%f", &stage_three_inference_time) == 1){
-					//printf("StageThreeInferenceTime is: %f ms\n", StageThreeInferenceTime);
+				if (sscanf(temp, "%f", &stage3_inference_time) == 1){
+					ret->stage3_inference_time = stage3_inference_time;
 					break;
 				}
 				temp = strtok(NULL, " ");
 			}
 		}
 	}
-	/* Check Throughput and Latency Constraints */
-	if ( Latency <= Target_Latency ){
-		LatencyCondition=1; //Latency requirement was met.
-	}
-	if ( FPS >= Target_FPS ){
-		FPSCondition=1; //FPS requirement was met.
-	}
 }
 
 
-void set_system_config(){
-	/* Export OpenCL library path */
-    system("export LD_LIBRARY_PATH=/data/local/Working_dir");
-	setenv("LD_LIBRARY_PATH","/data/local/Working_dir",1);
+bool conditions_met(stats_t *s, float target_fps, float target_latency) {
 
-	/* Setup Performance Governor (CPU) */
-	system("echo performance > /sys/devices/system/cpu/cpufreq/policy0/scaling_governor");
-	system("echo performance > /sys/devices/system/cpu/cpufreq/policy2/scaling_governor");
-
+	if (s->latency <= target_latency && s->fps >= target_fps){
+		return true;
+	}
+	return false;
 }
 
 
-int main (int argc, char *argv[])
-{
-	if ( argc < 5 ){
-		printf("Wrong number of input arguments.\n");
-		return -1;
-	}
-
-    char graph[100];
-	sscanf(argv[1], "%s", graph);
-	partitions=atoi(argv[2]);
-	target_fps=atoi(argv[3]);
-	target_latency=atoi(argv[4]);
-
-	char command[100];
-
-	/* Checking if processor is available */
-	if (system(NULL)) {
-        puts ("Ok");
-    } else {
-        exit (EXIT_FAILURE);
-    }
-
-    set_system_config();
-	/* Initialize Little and Big CPU with Lowest Frequency */
-
-
-	int N_Frames=10;
-	/* Start with running half network on Little CPU and half network on Big CPU with GPU empty in the middle */
-	int PartitionPoint1=partitions/2;
-	int PartitionPoint2=partitions/2;
-	string Order="L-G-B";
-    
-	while(true){
-		char Run_Command[150];		
-		sprintf(Run_Command, "./%s --threads=4 --threads2=2 --target=NEON --n=%d --partition_point=%d --partition_point2=%d --order=%s > output.txt 2>&1",
-        graph, N_Frames, PartitionPoint1, PartitionPoint2, Order.c_str());
-		system(Run_Command);
-		ParseResults();
-		if ( FPSCondition && LatencyCondition ){//Both Latency and Throughput Requirements are Met.
-			printf("Solution Was Found.\n TargetBigFrequency:%d \t TargetLittleFrequency:%d \t PartitionPoint1:%d \t PartitionPoint2:%d \t Order:%s\n", 
-			BigFrequencyTable[BigFrequencyCounter],LittleFrequencyTable[LittleFrequencyCounter], PartitionPoint1, PartitionPoint2, Order.c_str());
-			break;	
-		}
-
-		printf("Target Perfromance Not Satisfied\n\n");
-
-		if ( LittleFrequencyCounter < MaxLittleFrequencyCounter ){
-			/* Push Frequency of Little Cluster Higher to Meet Target Performance */
-			LittleFrequencyCounter=LittleFrequencyCounter+1;
-			Command="echo " + to_string(LittleFrequencyTable[LittleFrequencyCounter]) + " > /sys/devices/system/cpu/cpufreq/policy0/scaling_max_freq";
-			system(Command.c_str());
-			printf("Increasing Frequency of Little Cores to %d\n", LittleFrequencyTable[LittleFrequencyCounter]);
-		}
-		else{
-			if ( BigFrequencyCounter < MaxBigFrequencyCounter ){
-				/* Push Frequency of Small Cluster Higher to Meet Target Performance */
-				BigFrequencyCounter=BigFrequencyCounter+1;
-				Command="echo " + to_string(BigFrequencyTable[BigFrequencyCounter]) + " > /sys/devices/system/cpu/cpufreq/policy2/scaling_max_freq";
-				system(Command.c_str());
-				printf("Increasing Frequency of Big Cores to %d\n", BigFrequencyTable[BigFrequencyCounter]);
-			}
-			else{
-				if ( StageOneInferenceTime < StageThreeInferenceTime ){
-					if ( PartitionPoint2 < partitions ){
-						/* Push Layers from Third Stage (Big CPU) to GPU to Meet Target Performance */
-						PartitionPoint2=PartitionPoint2+1;
-						printf("Reducing the Size of Pipeline Partition 3\n");
-					}
-					else{
-						printf("No Solution Found\n");
-						break;
-					}
-				}
-				else{
-					if ( PartitionPoint1 > 1 ){
-						/* Push Layers from First Stage (Little CPU) to GPU to Meet Target Performance */
-						PartitionPoint1=PartitionPoint1-1;
-						printf("Reducing the Size of Pipeline Partition 1\n");
-					}
-					else{
-						printf("No Solution Found\n");
-						break;
-					}
-				}
-			}
-		}
-	}
-  
-  return 0;
+float fx_freq_power_lcpu(float khz){      
+	return 4.827e-14 * pow(khz, 2) + 2.292e-7 * khz + 1.855;
 }
+
+float fx_freq_power_bcpu(float khz){      
+	return 6.998e-13 * pow(khz, 2) - 7.705e-7 * khz + 2.523;
+}
+
+float fx_freq_latency_lcpu(float khz){
+    float ghz = khz / 1e6;
+	return -1.951e+01 * exp(-1.412e+02 * ghz) + 521.364;
+}
+
+float fx_freq_latency_bcpu(float khz){
+	float ghz = khz / 1e6;
+	return 8.573e+02 * exp(-2.059e+00 * ghz) + 100.429;
+}
+
+float fx_freq_fps_lcpu(float khz){
+    float ghz = khz / 1e6;
+	return 6.027e+03 * exp(1.836e-04 * ghz) + -6026.159;
+}
+
+float fx_freq_fps_bcpu(float khz){
+	float ghz = khz / 1e6;
+	return 3.016e+04 * exp(1.385e-04 * ghz) + -30158.352;
+}
+
+float fx_power_freq_lcpu(float watts){
+	return -1.74e+06 * (watts*watts) + 1.042e+07 * watts - 1.329e+07;
+}
+
+float fx_power_freq_bcpu(float watts){
+	return -3.409e+05 * (watts*watts) + 2.991e+06 * watts - 4.385e+06;
+}
+
+float fx_latency_freq_lcpu(float latency){
+	return 7.828e+07 * exp(-1.052e+04 * x_GHz) + 561899.921;
+}
+
+float fx_latency_freq_bcpu(float latency){
+	return 6.359e+06 * exp(-1.289e+04 * x_GHz) + 514867.777;
+}
+
+float fx_fps_freq_lcpu(float fps){
+	return 1.654e+04 * exp(1.745e+06 * x_GHz) + 437989.902;
+}
+
+float fx_fps_freq_bcpu(float fps){
+	return 2.469e+06 * exp(6.474e+04 * x_GHz) + -2380643.071;
+}
+
+
+

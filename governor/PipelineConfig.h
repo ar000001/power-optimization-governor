@@ -4,10 +4,17 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
+#include <stdbool.h>
 
 #define MAX_PARTITION_POINT 8
 #define NUM_BIG_FREQUENCIES 13
 #define NUM_LITTLE_FREQUENCIES 9
+
+typedef enum {
+    GPU = 0,
+    BIG_CPU = 1,
+    LITTLE_CPU = 2
+} processor;
 
 extern const int LITTLE_FREQUENCY_TABLE[];
 extern const int BIG_FREQUENCY_TABLE[];
@@ -22,22 +29,26 @@ typedef struct PipelineConfig {
 
 void run_inference(PipelineConfig *config, char *graph, int n_frames);
 
-inline void print_pipe_line_config(PipelineConfig *config);
+void print_pipe_line_config(PipelineConfig *config);
 
-inline int set_partition_point1(PipelineConfig *config, int partition_point);
+int set_partition_point1(PipelineConfig *config, int partition_point);
 
-inline int set_partition_point2(PipelineConfig *config, int partition_point);
+int set_partition_point2(PipelineConfig *config, int partition_point);
 
-inline int set_order(PipelineConfig *config, char *order);
+int set_order(PipelineConfig *config, char *order);
 
 int validate_order(char *order);
 
-inline int set_big_frequency(PipelineConfig *config, int freq);
+int set_frequency(PipelineConfig *config, int freq, processor cpu);
 
-inline int set_little_frequency(PipelineConfig *config, int freq);
+int increment_frequency(int freq, processor cpu);
 
-int validate_big_frequency(int freq);
+int decrement_frequency(int freq, processor cpu);
 
-int validate_little_frequency(int freq);
+int set_little_frequency(PipelineConfig *config, int freq);
+
+bool validate_frequency(int freq, processor cpu);
+
+bool validate_little_frequency(int freq);
 
 #endif
