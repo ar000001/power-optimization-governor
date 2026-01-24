@@ -88,48 +88,37 @@ int set_frequency(PipelineConfig *config, int freq, processor cpu) {
     return validate_frequency(freq, cpu);
 }
 
-int increment_frequency(int freq, processor cpu){
+
+void increment_frequency(PipelineConfig *config, int freq, processor cpu){
 
     if (cpu == BIG_CPU){
         for(int i = 0; i < NUM_BIG_FREQUENCIES-1; i++) {
             if (freq == BIG_FREQUENCY_TABLE[i])
-                return BIG_FREQUENCY_TABLE[i+1];
+                config->big_frequency = BIG_FREQUENCY_TABLE[i+1];
         }
     } else if (cpu == LITTLE_CPU) {
         for(int i = 0; i < NUM_LITTLE_FREQUENCIES-1; i++) {
             if (freq == LITTLE_FREQUENCY_TABLE[i])
-                return LITTLE_FREQUENCY_TABLE[i+1];
+                config->little_frequency = LITTLE_FREQUENCY_TABLE[i+1];
         }
     }
-
-    return -1;
 }
 
-int decrement_frequency(int freq, processor cpu){
+
+void decrement_frequency(PipelineConfig *config, int freq, processor cpu){
 
     if (cpu == BIG_CPU){
         for(int i=1; i < NUM_BIG_FREQUENCIES; i++) {
             if (freq == BIG_FREQUENCY_TABLE[i])
-                return BIG_FREQUENCY_TABLE[i-1];
+                config->big_frequency = freq;
         }
     } else if (cpu == LITTLE_CPU){
         for(int i=1; i < NUM_LITTLE_FREQUENCIES; i++) {
             if (freq == LITTLE_FREQUENCY_TABLE[i])
-                return LITTLE_FREQUENCY_TABLE[i-1];
+                config->little_frequency = freq;
         }
     }
-
-    return -1;
 }
-
-int set_little_frequency(PipelineConfig *config, int freq) {
-    if(validate_little_frequency(freq)) {
-        config->little_frequency = freq;
-        return 0;
-    } else
-        return -1;
-}
-
 
 bool validate_frequency(int freq, processor cpu){
     
@@ -147,11 +136,41 @@ bool validate_frequency(int freq, processor cpu){
     return false;
 }
 
-bool validate_little_frequency(int freq){
+void calc_partition_sizes(PipelineConfig *config, int total_parts, int *out_g, int *out_b, int *out_l){
     
-    for (int i = 0; i < NUM_LITTLE_FREQUENCIES; i++){
-        if (freq == LITTLE_FREQUENCY_TABLE[i])
-            return true;
+    int first_stage = config->partition_point1;
+    int second_stage = config->partition_point2-first_stage;
+    int third_stage = total_parts - second_stage;
+
+    char first, second, third;
+
+    sscanf(config->order, "%c-%c-%c", &first, &second, &third);
+    if (first == 'G') {
+        *out_g = first_stage;
+        if (second == 'B') {
+            *out_b = second_stage;
+            *out_l = third_stage;
+        } else {
+            *out_l = second_stage;
+            *out_b = third_stage;
+        }
+    } else if (first == 'B') {
+        *out_b = first_stage;
+        if (second == 'G') {
+            *out_g = second_stage;
+            *out_l = third_stage;
+        } else {
+            *out_l = second_stage;
+            *out_g = third_stage;
+        }
+    } else {
+        *out_l = first_stage;
+        if (second == 'B') {
+            *out_b = second_stage;
+            *out_g = third_stage;
+        } else {
+            *out_g = second_stage;
+            *out_b = third_stage;
+        }
     }
-    return false;
 }

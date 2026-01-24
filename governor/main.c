@@ -4,9 +4,10 @@
 
 #include "Governor.h"
 #include "PipelineConfig.h"
+#include "ApproximationModels.h"
 
 
-int partitions=0;
+int total_parts=0;
 int target_fps=0;
 int target_latency=0;
 
@@ -25,12 +26,13 @@ void set_system_config(){
 int main (int argc, char *argv[]) {
 	if ( argc < 5 ){
 		printf("Wrong number of input arguments.\n");
+        printf("Usage: ./governor <graph> <total_parts> <target_fps> <target_latency>\n");
 		return -1;
 	}
 
     char graph[100];
 	sscanf(argv[1], "%s", graph);
-	partitions=atoi(argv[2]);
+	total_parts=atoi(argv[2]);
 	target_fps=atoi(argv[3]);
 	target_latency=atoi(argv[4]);
 
@@ -49,9 +51,17 @@ int main (int argc, char *argv[]) {
         exit (EXIT_FAILURE);
     }
 
+    approximate_target_space((double)target_fps, (double)target_latency, &config);
+
+    double p = estimate_power(&config);
+    printf("[smoke-test] estimated power: %f\n", p);
+
+    
+
+    /*
     set_system_config();
 
-	stats_t stats;
+    stats_t stats;
 
 	while(1){
 		run_inference(&config, graph, 60);
@@ -64,7 +74,7 @@ int main (int argc, char *argv[]) {
 			break;
 		}
 	}
-
+    */
   
   	return 0;
 }

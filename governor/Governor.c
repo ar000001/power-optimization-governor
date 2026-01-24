@@ -2,69 +2,27 @@
 #include <stdlib.h>     
 #include <stdbool.h>
 #include <math.h>
+#include "Governor.h"
 #include "PipelineConfig.h"
+#include "ApproximationModels.h"
 
 // This config is a very well performing config.
 // From this config on, we will try to find a better config, by tweaking values slightly.
 PipelineConfig ROOT_CONFIG = {4, 6, 1800000, 1200000, "G-B-L"};
 
-typedef struct {
-	float latency;
-	float fps;
-	float stage1_inference_time;
-	float stage2_inference_time;
-	float stage3_inference_time;
-} stats_t;
 
-typedef struct {
-	bool increase_bigCPU;
-	bool decrease_bigCPU;
-	float (*fx_freq_power_little_cpu)(float);
-	float (*fx_freq_power_big_cpu)(float);
-	float (*fx_freq_latency_little_cpu)(float);
-	float (*fx_freq_latency_big_cpu)(float);
-	float (*fx_freq_fps_little_cpu)(float);
-	float (*fx_freq_fps_big_cpu)(float);
-	float latency_margin;
-	float fps_margin;
-} Policy;
-
-
-void apply_policy(Policy *policy, PipelineConfig *config, stats_t *stats, float target_fps, float target_latency){
-
-	float latency_diff = stats->latency - target_latency;
-	float fps_diff = stats->fps - target_fps;
-
-	if (latency_diff > 0){ //target not met
-
-		if (policy->increase_bigCPU)
-			increment_frequency(config->big_frequency, BIG_CPU);
-		 else 
-			increment_frequency(config->little_frequency, LITTLE_CPU);
-
-		policy->increase_bigCPU = !policy->increase_bigCPU;
-		policy->decrease_bigCPU = false; //if there has been an increase, the next decrease must be of littleCPU
-
-	} else if (latency_diff  < policy->latency_margin) { //target met with margin
-		if (policy->decrease_bigCPU)
-			decrement_frequency(config->big_frequency, BIG_CPU);
-		 else 
-			decrement_frequency(config->little_frequency, LITTLE_CPU);
-
-		policy->decrease_bigCPU = !policy->decrease_bigCPU;
-
-	}
-
+void apply_policy(Policy *policy, PipelineConfig *config, stats_t *stats, double target_fps, double target_latency){
+	return;
 }
 
 
 /* Get feedback by parsing the results */
 void parse_results(stats_t *ret){
-	float fps;
-	float latency;
-	float stage1_inference_time;
-	float stage2_inference_time;
-	float stage3_inference_time;
+	double fps;
+	double latency;
+	double stage1_inference_time;
+	double stage2_inference_time;
+	double stage3_inference_time;
 	FILE *output_file;
     char *line = NULL;
     size_t len = 0;
@@ -83,10 +41,10 @@ void parse_results(stats_t *ret){
 
 			temp = strtok(line, " ");
 			while (temp != NULL) {
-				/* Checking the given word is float or not */
-				if (sscanf(temp, "%f", &fps) == 1){
+				/* Checking the given word is double or not */
+				if (sscanf(temp, "%lf", &fps) == 1){
 					ret->fps = fps;
-					printf("Throughput is: %f FPS\n", fps);
+					printf("Throughput is: %lf FPS\n", fps);
 					break;
 				}
 				temp = strtok(NULL, " ");
@@ -97,10 +55,10 @@ void parse_results(stats_t *ret){
 
 			temp = strtok(line, " ");
 			while (temp != NULL) {
-				/* Checking the given word is float or not */
-				if (sscanf(temp, "%f", &latency) == 1){
+				/* Checking the given word is double or not */
+				if (sscanf(temp, "%lf", &latency) == 1){
 					ret->latency = latency;
-					printf("Latency is: %f ms\n", latency);
+					printf("Latency is: %lf ms\n", latency);
 					break;
 				}
 				temp = strtok(NULL, " ");
@@ -111,8 +69,8 @@ void parse_results(stats_t *ret){
 			
 			temp = strtok(line, " ");
 			while (temp != NULL) {
-				/* Checking the given word is float or not */
-				if (sscanf(temp, "%f", &stage1_inference_time) == 1){
+				/* Checking the given word is double or not */
+				if (sscanf(temp, "%lf", &stage1_inference_time) == 1){
 					ret->stage1_inference_time = stage1_inference_time;
 					break;
 				}
@@ -123,8 +81,8 @@ void parse_results(stats_t *ret){
 		if ( strstr(line, "stage2_inference_time:")!=NULL ){
 			temp = strtok(line, " ");
 			while (temp != NULL) {
-				/* Checking the given word is float or not */
-				if (sscanf(temp, "%f", &stage2_inference_time) == 1){
+				/* Checking the given word is double or not */
+				if (sscanf(temp, "%lf", &stage2_inference_time) == 1){
 					ret->stage2_inference_time = stage2_inference_time;
 					break;
 				}
@@ -135,8 +93,8 @@ void parse_results(stats_t *ret){
 		if ( strstr(line, "stage3_inference_time:")!=NULL ){
             temp = strtok(line, " ");
 			while (temp != NULL) {
-				/* Checking the given word is float or not */
-				if (sscanf(temp, "%f", &stage3_inference_time) == 1){
+				/* Checking the given word is double or not */
+				if (sscanf(temp, "%lf", &stage3_inference_time) == 1){
 					ret->stage3_inference_time = stage3_inference_time;
 					break;
 				}
@@ -147,66 +105,12 @@ void parse_results(stats_t *ret){
 }
 
 
-bool conditions_met(stats_t *s, float target_fps, float target_latency) {
+bool conditions_met(stats_t *s, double target_fps, double target_latency) {
 
 	if (s->latency <= target_latency && s->fps >= target_fps){
 		return true;
 	}
 	return false;
 }
-
-
-float fx_freq_power_lcpu(float khz){      
-	return 4.827e-14 * pow(khz, 2) + 2.292e-7 * khz + 1.855;
-}
-
-float fx_freq_power_bcpu(float khz){      
-	return 6.998e-13 * pow(khz, 2) - 7.705e-7 * khz + 2.523;
-}
-
-float fx_freq_latency_lcpu(float khz){
-    float ghz = khz / 1e6;
-	return -1.951e+01 * exp(-1.412e+02 * ghz) + 521.364;
-}
-
-float fx_freq_latency_bcpu(float khz){
-	float ghz = khz / 1e6;
-	return 8.573e+02 * exp(-2.059e+00 * ghz) + 100.429;
-}
-
-float fx_freq_fps_lcpu(float khz){
-    float ghz = khz / 1e6;
-	return 6.027e+03 * exp(1.836e-04 * ghz) + -6026.159;
-}
-
-float fx_freq_fps_bcpu(float khz){
-	float ghz = khz / 1e6;
-	return 3.016e+04 * exp(1.385e-04 * ghz) + -30158.352;
-}
-
-float fx_power_freq_lcpu(float watts){
-	return -1.74e+06 * (watts*watts) + 1.042e+07 * watts - 1.329e+07;
-}
-
-float fx_power_freq_bcpu(float watts){
-	return -3.409e+05 * (watts*watts) + 2.991e+06 * watts - 4.385e+06;
-}
-
-float fx_latency_freq_lcpu(float latency){
-	return 7.828e+07 * exp(-1.052e+04 * x_GHz) + 561899.921;
-}
-
-float fx_latency_freq_bcpu(float latency){
-	return 6.359e+06 * exp(-1.289e+04 * x_GHz) + 514867.777;
-}
-
-float fx_fps_freq_lcpu(float fps){
-	return 1.654e+04 * exp(1.745e+06 * x_GHz) + 437989.902;
-}
-
-float fx_fps_freq_bcpu(float fps){
-	return 2.469e+06 * exp(6.474e+04 * x_GHz) + -2380643.071;
-}
-
 
 

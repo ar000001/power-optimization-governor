@@ -6,7 +6,6 @@
 #include <stdlib.h>
 #include <stdbool.h>
 
-#define MAX_PARTITION_POINT 8
 #define NUM_BIG_FREQUENCIES 13
 #define NUM_LITTLE_FREQUENCIES 9
 
@@ -41,14 +40,10 @@ int validate_order(char *order);
 
 int set_frequency(PipelineConfig *config, int freq, processor cpu);
 
-int increment_frequency(int freq, processor cpu);
+void increment_frequency(PipelineConfig *config, int freq, processor cpu);
 
-int decrement_frequency(int freq, processor cpu);
-
-int set_little_frequency(PipelineConfig *config, int freq);
+void decrement_frequency(PipelineConfig *config, int freq, processor cpu);
 
 bool validate_frequency(int freq, processor cpu);
-
-bool validate_little_frequency(int freq);
 
 #endif
