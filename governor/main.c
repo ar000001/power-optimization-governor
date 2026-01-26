@@ -5,6 +5,7 @@
 #include "Governor.h"
 #include "PipelineConfig.h"
 #include "ApproximationModels.h"
+#include "PIDController.h"
 
 
 int total_parts=0;
@@ -51,30 +52,56 @@ int main (int argc, char *argv[]) {
         exit (EXIT_FAILURE);
     }
 
+    if (load_measurement_grid("../experiment_scripts/data/exp6_freq_sweep_fixed_order_partition_20260123_145108.csv") != 0) {
+        fprintf(stderr, "Failed to load measurement grid\n");
+        return -1;
+    }
+
     approximate_target_space((double)target_fps, (double)target_latency, &config);
 
     double p = estimate_power(&config);
     printf("[smoke-test] estimated power: %f\n", p);
 
-    
-
-    /*
     set_system_config();
 
-    stats_t stats;
+    PIDGovernor pid_gov;
+    pid_governor_init(&pid_gov, (double)target_fps, (double)target_latency, 100);
 
-	while(1){
-		run_inference(&config, graph, 60);
-		parse_results(&stats);
-		apply_policy(&policy,&config, &stats, target_fps, target_latency);
-		if (conditions_met(&stats, target_fps, target_latency) == 0){
-			//NOTE: might be changed later on, such that if a config is found, it
-			// still continues to try to find a better config.
-			print_pipe_line_config(&config);
-			break;
-		}
-	}
-    */
+    stats_t stats;
+    double estimated_power = 0.0;
+    PIDResult result;
+
+    printf("\n[PID Governor] Starting optimization for target_fps=%d, target_latency=%d\n", 
+           target_fps, target_latency);
+    printf("[PID Governor] Initial config: big_freq=%d, little_freq=%d, pp1=%d, pp2=%d\n",
+           config.big_frequency, config.little_frequency,
+           config.partition_point1, config.partition_point2);
+
+    while (1) {
+        run_inference(&config, graph, 60);
+        parse_results(&stats);
+        
+        result = pid_governor_step(&pid_gov, &config, &stats, &estimated_power);
+        
+        if (result == PID_CONVERGED) {
+            printf("\n[PID Governor] Optimization complete!\n");
+            printf("  Final config: big_freq=%d, little_freq=%d, pp1=%d, pp2=%d, order=%s\n",
+                   config.big_frequency, config.little_frequency,
+                   config.partition_point1, config.partition_point2, config.order);
+            printf("  Estimated power: %.3f W\n", estimated_power);
+            printf("  Achieved: fps=%.2f, latency=%.2f ms\n", stats.fps, stats.latency);
+            print_pipe_line_config(&config);
+            break;
+        } else if (result == PID_MAX_ITERATIONS) {
+            printf("\n[PID Governor] Max iterations reached without full convergence.\n");
+            printf("  Best config: big_freq=%d, little_freq=%d, pp1=%d, pp2=%d\n",
+                   config.big_frequency, config.little_frequency,
+                   config.partition_point1, config.partition_point2);
+            printf("  Estimated power: %.3f W\n", estimated_power);
+            printf("  Last stats: fps=%.2f, latency=%.2f ms\n", stats.fps, stats.latency);
+            break;
+        }
+    }
   
   	return 0;
 }

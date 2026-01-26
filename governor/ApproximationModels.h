@@ -86,6 +86,7 @@ static inline double fx_fps_freq_bcpu(double fps){
 	return (1.882e-01 / denom)*1e6;
 }
 
+int load_measurement_grid(const char *filepath);
 void approximate_target_space(double target_fps, double target_latency, PipelineConfig *config);
 
 #endif
