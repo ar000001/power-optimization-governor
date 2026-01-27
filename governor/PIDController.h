@@ -5,6 +5,8 @@
 #include "PipelineConfig.h"
 #include "Governor.h"
 
+#define TOTAL_LAYERS 8
+
 typedef struct {
     double Kp;
     double Ki;
@@ -20,12 +22,15 @@ typedef struct {
     PIDState latency_pid;
     double target_fps;
     double target_latency;
+    double prev_latency;
+    double prev_fps;
+    bool has_prev;
     double power_reduction_rate;
     int iteration;
     int max_iterations;
     bool converged;
     int total_layers;
-    int partition_step_cooldown;
+    int partition_step_cooldown;    
 } PIDGovernor;
 
 void pid_init(PIDState *pid, double Kp, double Ki, double Kd, 
@@ -53,6 +58,10 @@ void pid_governor_apply_frequency_adjustment(PIDGovernor *gov,
                                              double latency_adjustment);
 
 int snap_to_valid_frequency(int freq, processor cpu);
+
+int get_frequency_index(int freq, processor cpu);
+
+int frequency_step(int current_freq, int steps, processor cpu);
 
 void pid_governor_adjust_partition_points(PIDGovernor *gov, PipelineConfig *config,
                                           double fps_margin, double latency_margin,
