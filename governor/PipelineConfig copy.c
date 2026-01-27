@@ -16,9 +16,9 @@ const int BIG_FREQUENCY_TABLE[]={500000, 667000, 1000000, 1200000, 1398000, 1512
 void run_inference(PipelineConfig *config, char *graph, int n_frames){
     
     char command[256];
-    sprintf(command, "./set_freq.sh little %d", config->little_frequency);
+    sprintf(command, "adb -d shell \"echo %d > /sys/devices/system/cpu/cpufreq/policy0/scaling_max_freq\"", config->little_frequency);
     system(command);
-    sprintf(command, "./set_freq.sh big %d", config->big_frequency);
+    sprintf(command, "adb -d shell \"echo %d > /sys/devices/system/cpu/cpufreq/policy2/scaling_max_freq\"", config->big_frequency);
     system(command);
 
     sprintf(command, "./run_inference.sh %s %d %d %d %s > output.txt 2>&1",

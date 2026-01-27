@@ -1,6 +1,8 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <sys/stat.h>
+#include <time.h>
 
 #include "Governor.h"
 #include "PipelineConfig.h"
@@ -12,15 +14,26 @@ int total_parts=0;
 int target_fps=0;
 int target_latency=0;
 
+static time_t get_file_mtime(const char *path) {
+    struct stat st;
+    if (stat(path, &st) != 0) {
+        return 0;
+    }
+    return st.st_mtime;
+}
+
 
 void set_system_config(){
 	/* Export OpenCL library path */
     system("export LD_LIBRARY_PATH=/data/local/Working_dir");
+    system("adb -d root");
 	setenv("LD_LIBRARY_PATH","/data/local/Working_dir",1);
 
 	/* Setup Performance Governor (CPU) */
-	system("echo performance > /sys/devices/system/cpu/cpufreq/policy0/scaling_governor");
-	system("echo performance > /sys/devices/system/cpu/cpufreq/policy2/scaling_governor");
+	system("adb -d shell \"echo performance > /sys/devices/system/cpu/cpufreq/policy0/scaling_governor\"");
+	system("adb -d shell \"echo performance > /sys/devices/system/cpu/cpufreq/policy2/scaling_governor\"");
+
+    system("./set_fan.sh 1 0 1");
 }
 
 
@@ -78,9 +91,18 @@ int main (int argc, char *argv[]) {
            config.partition_point1, config.partition_point2);
 
     while (1) {
-        run_inference(&config, graph, 60);
+        time_t mtime_before = get_file_mtime("last_run_output.txt");
+        run_inference(&config, graph, 100);
+        time_t mtime_after = get_file_mtime("last_run_output.txt");
+
+        if (mtime_after == mtime_before) {
+            printf("\n[PID Governor] Inference interrupted (Ctrl-C detected). Exiting.\n");
+            system("./set_fan.sh 1 0 0");
+            return 1;
+        }
+
         parse_results(&stats);
-        
+
         result = pid_governor_step(&pid_gov, &config, &stats, &estimated_power);
         
         if (result == PID_CONVERGED) {
@@ -101,6 +123,8 @@ int main (int argc, char *argv[]) {
             printf("  Last stats: fps=%.2f, latency=%.2f ms\n", stats.fps, stats.latency);
             break;
         }
+
+        printf("\n\n");
     }
   
   	return 0;

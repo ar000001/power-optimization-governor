@@ -27,7 +27,7 @@ void parse_results(stats_t *ret){
     char *line = NULL;
     size_t len = 0;
     
-    if ((output_file = fopen("output.txt", "r")) == NULL) {
+    if ((output_file = fopen("last_run_output.txt", "r")) == NULL) {
 		printf("Error opening file\n");
 		return;
 	}
