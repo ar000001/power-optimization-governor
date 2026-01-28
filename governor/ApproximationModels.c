@@ -129,6 +129,38 @@ static double grid_fps_min, grid_fps_max;
 static double grid_latency_min, grid_latency_max;
 static int grid_loaded = 0;
 
+ static const double MEASUREMENT_FPS_LUT[NUM_BIG_FREQUENCIES][NUM_LITTLE_FREQUENCIES] = {
+     {3.346040, 4.377780, 4.232640, 4.188820, 4.164900, 4.196390, 4.166370, 4.184710, 4.185660},
+     {6.569120, 6.577360, 6.575900, 6.575030, 6.582240, 6.579170, 6.574160, 6.576520, 6.570770},
+     {9.877850, 9.931090, 9.963640, 9.928120, 9.766520, 9.966470, 9.956640, 9.933330, 9.764850},
+     {9.938270, 11.743700, 11.755700, 11.762500, 11.772200, 11.766100, 11.571500, 11.776600, 11.771600},
+     {9.861600, 12.761500, 13.409400, 13.448400, 13.471400, 13.465500, 13.474800, 13.495300, 13.230400},
+     {9.783870, 12.748500, 14.389800, 14.358400, 14.379900, 14.384800, 14.369200, 14.383900, 14.360500},
+     {9.737340, 12.719600, 14.874200, 14.869000, 14.875300, 14.874200, 14.879500, 14.899700, 14.911800},
+     {9.812670, 12.559400, 15.526300, 15.591400, 15.598100, 15.609200, 15.804800, 15.560600, 15.654300},
+     {9.776630, 12.600500, 16.281500, 16.207100, 16.253500, 16.310500, 16.250000, 16.313600, 16.280000},
+     {9.789500, 12.658100, 16.992300, 17.015500, 17.040700, 16.994200, 16.981700, 16.995000, 17.030200},
+     {9.714770, 12.694000, 16.849700, 17.660300, 17.640500, 17.657800, 17.713800, 17.665300, 17.661800},
+     {9.785530, 12.613700, 16.769600, 18.169300, 18.154200, 18.102600, 18.195500, 18.174000, 18.246400},
+     {9.619060, 12.620400, 17.003200, 18.552900, 18.821400, 18.744800, 18.802800, 18.734700, 18.857800},
+ };
+
+ static const double MEASUREMENT_LATENCY_LUT[NUM_BIG_FREQUENCIES][NUM_LITTLE_FREQUENCIES] = {
+     {651.768, 510.188, 525.308, 530.112, 532.572, 528.319, 531.156, 529.349, 529.002},
+     {355.303, 354.730, 355.089, 355.080, 353.552, 354.020, 352.801, 353.841, 354.739},
+     {250.991, 247.759, 246.918, 246.894, 250.285, 246.503, 245.870, 246.674, 250.765},
+     {234.940, 216.349, 215.716, 212.617, 212.502, 211.894, 214.453, 212.208, 214.084},
+     {228.154, 198.901, 191.970, 190.714, 190.310, 190.088, 190.168, 189.635, 192.677},
+     {222.743, 194.187, 182.428, 182.818, 180.735, 180.848, 180.997, 180.607, 181.011},
+     {221.628, 192.198, 176.529, 176.542, 176.410, 176.402, 176.320, 175.850, 175.317},
+     {218.008, 190.353, 171.368, 170.386, 169.927, 170.118, 168.280, 170.506, 168.967},
+     {214.374, 187.621, 165.345, 165.826, 165.090, 164.170, 164.868, 164.178, 164.775},
+     {212.481, 183.785, 160.459, 159.896, 159.471, 159.666, 159.882, 159.626, 159.237},
+     {211.987, 182.962, 159.399, 156.075, 156.037, 155.831, 155.094, 155.601, 155.644},
+     {210.192, 179.552, 157.880, 152.843, 153.066, 153.402, 152.695, 152.450, 151.823},
+     {211.836, 178.035, 155.403, 150.661, 149.117, 149.765, 149.291, 149.708, 149.143},
+ };
+
 static int freq_to_big_idx(int freq) {
     for (int i = 0; i < NUM_BIG_FREQUENCIES; i++) {
         if (BIG_FREQUENCY_TABLE[i] == freq) return i;
@@ -144,50 +176,31 @@ static int freq_to_little_idx(int freq) {
 }
 
 int load_measurement_grid(const char *filepath) {
-    FILE *fp = fopen(filepath, "r");
-    if (!fp) {
-        fprintf(stderr, "load_measurement_grid: cannot open %s\n", filepath);
-        return -1;
-    }
-    
-    char line[256];
-    int line_num = 0;
+    (void)filepath;
+
     grid_fps_min = 1e9;
     grid_fps_max = -1e9;
     grid_latency_min = 1e9;
     grid_latency_max = -1e9;
-    
-    while (fgets(line, sizeof(line), fp)) {
-        line_num++;
-        if (line_num <= 2) continue;  // skip header lines
-        
-        int big_freq, little_freq, pp1, pp2;
-        char order[16];
-        double fps, latency;
-        
-        if (sscanf(line, "%d,%d,%d,%d,%[^,],%lf,%lf", 
-                   &big_freq, &little_freq, &pp1, &pp2, order, &fps, &latency) != 7) {
-            continue;
+
+    for (int big_idx = 0; big_idx < NUM_BIG_FREQUENCIES; big_idx++) {
+        for (int little_idx = 0; little_idx < NUM_LITTLE_FREQUENCIES; little_idx++) {
+            double fps = MEASUREMENT_FPS_LUT[big_idx][little_idx];
+            double latency = MEASUREMENT_LATENCY_LUT[big_idx][little_idx];
+
+            measurement_grid[big_idx][little_idx].fps = fps;
+            measurement_grid[big_idx][little_idx].latency = latency;
+
+            if (fps < grid_fps_min) grid_fps_min = fps;
+            if (fps > grid_fps_max) grid_fps_max = fps;
+            if (latency < grid_latency_min) grid_latency_min = latency;
+            if (latency > grid_latency_max) grid_latency_max = latency;
         }
-        
-        int big_idx = freq_to_big_idx(big_freq);
-        int little_idx = freq_to_little_idx(little_freq);
-        
-        if (big_idx < 0 || little_idx < 0) continue;
-        
-        measurement_grid[big_idx][little_idx].fps = fps;
-        measurement_grid[big_idx][little_idx].latency = latency;
-        
-        if (fps < grid_fps_min) grid_fps_min = fps;
-        if (fps > grid_fps_max) grid_fps_max = fps;
-        if (latency < grid_latency_min) grid_latency_min = latency;
-        if (latency > grid_latency_max) grid_latency_max = latency;
     }
-    
-    fclose(fp);
+
     grid_loaded = 1;
-    printf("load_measurement_grid: loaded from %s (fps: %.2f-%.2f, latency: %.2f-%.2f)\n",
-           filepath, grid_fps_min, grid_fps_max, grid_latency_min, grid_latency_max);
+    printf("load_measurement_grid: loaded embedded LUT (fps: %.2f-%.2f, latency: %.2f-%.2f)\n",
+           grid_fps_min, grid_fps_max, grid_latency_min, grid_latency_max);
     return 0;
 }
 

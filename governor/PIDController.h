@@ -40,6 +40,9 @@ typedef struct {
     bool converged;
     int total_layers;
     int partition_step_cooldown;
+    PipelineConfig last_config;
+    bool has_last_config;
+    int same_config_streak;
     PipelineConfig best_config;
     double best_estimated_power;
     double best_violation;
@@ -85,7 +88,6 @@ int get_frequency_index(int freq, processor cpu);
 int frequency_step(int current_freq, int steps, processor cpu);
 
 void pid_governor_adjust_partition_points(PIDGovernor *gov, PipelineConfig *config,
-                                          stats_t *stats,
                                           double fps_margin, double latency_margin,
                                           bool reduce_power, bool force_partition);
 

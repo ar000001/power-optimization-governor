@@ -22,6 +22,22 @@ static time_t get_file_mtime(const char *path) {
     return st.st_mtime;
 }
 
+static void print_best_so_far(PIDGovernor *pid_gov) {
+    PipelineConfig best_config;
+    double best_power;
+    bool best_meets;
+
+    if (pid_governor_get_best(pid_gov, &best_config, &best_power, &best_meets)) {
+        printf("  Best-so-far config: big_freq=%d, little_freq=%d, pp1=%d, pp2=%d, order=%s, meets_targets=%s\n",
+               best_config.big_frequency, best_config.little_frequency,
+               best_config.partition_point1, best_config.partition_point2, best_config.order,
+               best_meets ? "YES" : "NO");
+        printf("  Best-so-far estimated power: %.3f W\n", best_power);
+    } else {
+        printf("  No best-so-far config cached.\n");
+    }
+}
+
 
 void set_system_config(){
 	/* Export OpenCL library path */
@@ -65,7 +81,7 @@ int main (int argc, char *argv[]) {
         exit (EXIT_FAILURE);
     }
 
-    if (load_measurement_grid("../experiment_scripts/data/exp6_freq_sweep_fixed_order_partition_20260127_154750.csv") != 0) {
+    if (load_measurement_grid("../experiment_scripts/data/exp6_freq_sweep_fixed_order_partition_20260123_145108.csv") != 0) {
         fprintf(stderr, "Failed to load measurement grid\n");
         return -1;
     }
@@ -78,7 +94,7 @@ int main (int argc, char *argv[]) {
     set_system_config();
 
     PIDGovernor pid_gov;
-    pid_governor_init(&pid_gov, (double)target_fps, (double)target_latency, 100);
+    pid_governor_init(&pid_gov, (double)target_fps, (double)target_latency, 20);
 
     stats_t stats;
     double estimated_power = 0.0;
@@ -97,6 +113,7 @@ int main (int argc, char *argv[]) {
 
         if (mtime_after == mtime_before) {
             printf("\n[PID Governor] Inference interrupted (Ctrl-C detected). Exiting.\n");
+            print_best_so_far(&pid_gov);
             system("./set_fan.sh 1 0 0");
             return 1;
         }
@@ -112,23 +129,12 @@ int main (int argc, char *argv[]) {
                    config.partition_point1, config.partition_point2, config.order);
             printf("  Estimated power: %.3f W\n", estimated_power);
             printf("  Achieved: fps=%.2f, latency=%.2f ms\n", stats.fps, stats.latency);
+            print_best_so_far(&pid_gov);
             print_pipe_line_config(&config);
             break;
         } else if (result == PID_MAX_ITERATIONS) {
             printf("\n[PID Governor] Max iterations reached without full convergence.\n");
-            PipelineConfig best_config;
-            double best_power;
-            bool best_meets;
-
-            if (pid_governor_get_best(&pid_gov, &best_config, &best_power, &best_meets)) {
-                printf("  Best-so-far config: big_freq=%d, little_freq=%d, pp1=%d, pp2=%d, meets_targets=%s\n",
-                       best_config.big_frequency, best_config.little_frequency,
-                       best_config.partition_point1, best_config.partition_point2,
-                       best_meets ? "YES" : "NO");
-                printf("  Best-so-far estimated power: %.3f W\n", best_power);
-            } else {
-                printf("  No best-so-far config cached.\n");
-            }
+            print_best_so_far(&pid_gov);
 
             printf("  Returned config: big_freq=%d, little_freq=%d, pp1=%d, pp2=%d\n",
                    config.big_frequency, config.little_frequency,
