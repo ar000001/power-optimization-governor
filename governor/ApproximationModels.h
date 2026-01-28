@@ -6,7 +6,6 @@
 
 #include "PipelineConfig.h"
 
-#define TOTAL_LAYERS 8
 #define GPU_POWER 3.0
 
 typedef struct {
