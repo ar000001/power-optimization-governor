@@ -9,6 +9,8 @@
 #define NUM_BIG_FREQUENCIES 13
 #define NUM_LITTLE_FREQUENCIES 9
 
+#define TOTAL_LAYERS 8
+
 typedef enum {
     GPU = 0,
     BIG_CPU = 1,
@@ -45,5 +47,7 @@ void increment_frequency(PipelineConfig *config, int freq, processor cpu);
 void decrement_frequency(PipelineConfig *config, int freq, processor cpu);
 
 bool validate_frequency(int freq, processor cpu);
+
+void enforce_no_single_layer_stages(PipelineConfig *config);
 
 #endif

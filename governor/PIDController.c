@@ -1,7 +1,154 @@
 #include "PIDController.h"
 #include "ApproximationModels.h"
+#include "PipelineConfig.h"
 #include <stdio.h>
 #include <math.h>
+#include <stdlib.h>
+
+static int int_abs(int x) {
+    return (x < 0) ? -x : x;
+}
+
+static void pid_apply_partition_move(PipelineConfig *config, int dpp1, int dpp2) {
+    if (!config) return;
+
+    const int orig_pp1 = config->partition_point1;
+    const int orig_pp2 = config->partition_point2;
+
+    int target_pp1 = orig_pp1 + dpp1;
+    int target_pp2 = orig_pp2 + dpp2;
+
+    if (target_pp1 < 1) target_pp1 = 1;
+    if (target_pp1 > TOTAL_LAYERS) target_pp1 = TOTAL_LAYERS;
+
+    if (target_pp2 < 1) target_pp2 = 1;
+    if (target_pp2 > TOTAL_LAYERS) target_pp2 = TOTAL_LAYERS;
+    if (target_pp2 < target_pp1) target_pp2 = target_pp1;
+
+    int best_pp1 = orig_pp1;
+    int best_pp2 = orig_pp2;
+    int best_cost = 1000000000;
+    int best_orig_cost = 1000000000;
+
+    for (int pp1 = 1; pp1 <= TOTAL_LAYERS; pp1++) {
+        for (int pp2 = pp1; pp2 <= TOTAL_LAYERS; pp2++) {
+            const int s1 = pp1;
+            const int s2 = pp2 - pp1;
+            const int s3 = TOTAL_LAYERS - pp2;
+
+            if (s1 == 1 || s2 == 1 || s3 == 1) continue;
+
+            if (dpp1 > 0 && pp1 <= orig_pp1) continue;
+            if (dpp1 < 0 && pp1 >= orig_pp1) continue;
+            if (dpp2 > 0 && pp2 <= orig_pp2) continue;
+            if (dpp2 < 0 && pp2 >= orig_pp2) continue;
+
+            const int cost = int_abs(pp1 - target_pp1) + int_abs(pp2 - target_pp2);
+            const int orig_cost = int_abs(pp1 - orig_pp1) + int_abs(pp2 - orig_pp2);
+
+            if (cost < best_cost || (cost == best_cost && orig_cost < best_orig_cost)) {
+                best_cost = cost;
+                best_orig_cost = orig_cost;
+                best_pp1 = pp1;
+                best_pp2 = pp2;
+            }
+        }
+    }
+
+    if (best_cost >= 1000000000) {
+        config->partition_point1 = target_pp1;
+        config->partition_point2 = target_pp2;
+        enforce_no_single_layer_stages(config);
+        return;
+    }
+
+    config->partition_point1 = best_pp1;
+    config->partition_point2 = best_pp2;
+}
+
+static double pid_governor_constraint_violation(const PIDGovernor *gov, const stats_t *stats) {
+    double fps_deficit = 0.0;
+    double lat_excess = 0.0;
+
+    if (stats->fps < gov->target_fps) {
+        fps_deficit = (gov->target_fps - stats->fps) / gov->target_fps;
+    }
+    if (stats->latency > gov->target_latency) {
+        lat_excess = (stats->latency - gov->target_latency) / gov->target_latency;
+    }
+
+    return fmax(fps_deficit, lat_excess);
+}
+
+static void pid_governor_maybe_update_best(PIDGovernor *gov, const PipelineConfig *config,
+                                          const stats_t *stats, double estimated_power) {
+    const bool meets_targets = (stats->fps >= gov->target_fps) && (stats->latency <= gov->target_latency);
+    const double violation = pid_governor_constraint_violation(gov, stats);
+
+    if (!gov->best_valid) {
+        gov->best_config = *config;
+        gov->best_estimated_power = estimated_power;
+        gov->best_violation = violation;
+        gov->best_meets_targets = meets_targets;
+        gov->best_valid = true;
+        return;
+    }
+
+    if (violation < gov->best_violation - 1e-12) {
+        gov->best_config = *config;
+        gov->best_estimated_power = estimated_power;
+        gov->best_violation = violation;
+        gov->best_meets_targets = meets_targets;
+        return;
+    }
+
+    if (fabs(violation - gov->best_violation) <= 1e-12) {
+        if (estimated_power < gov->best_estimated_power - 1e-12) {
+            gov->best_config = *config;
+            gov->best_estimated_power = estimated_power;
+            gov->best_violation = violation;
+            gov->best_meets_targets = meets_targets;
+        }
+    }
+}
+
+BottleneckStage detect_bottleneck(stats_t *stats, double *bottleneck_ratio) {
+    double stage1 = stats->stage1_inference_time;
+    double stage2 = stats->stage2_inference_time;
+    double stage3 = stats->stage3_inference_time;
+    
+    double total = stage1 + stage2 + stage3;
+
+    if (total <= 0.0) {
+        if (bottleneck_ratio) {
+            *bottleneck_ratio = 0.0;
+        }
+        return BOTTLENECK_NONE;
+    }
+    
+    double max_time = stage1;
+    BottleneckStage bottleneck = BOTTLENECK_STAGE1_GPU;
+    
+    if (stage2 > max_time) {
+        max_time = stage2;
+        bottleneck = BOTTLENECK_STAGE2_BIG;
+    }
+    if (stage3 > max_time) {
+        max_time = stage3;
+        bottleneck = BOTTLENECK_STAGE3_LITTLE;
+    }
+    
+    double ratio = max_time / total;
+    if (bottleneck_ratio) {
+        *bottleneck_ratio = ratio;
+    }
+
+    if (ratio < BOTTLENECK_RATIO_THRESHOLD) {
+        return BOTTLENECK_NONE;
+    }
+    
+    return bottleneck;
+}
 
 void pid_init(PIDState *pid, double Kp, double Ki, double Kd,
               double output_min, double output_max) {
@@ -56,7 +203,7 @@ void pid_governor_init(PIDGovernor *gov, double target_fps, double target_latenc
                        int max_iterations) {
     // Step-based output: bounds are in frequency table steps (e.g., ±3 steps max per iteration)
     // Kp/Ki/Kd are now dimensionless since error is normalized and output is in steps
-    pid_init(&gov->fps_pid, 3.0, 0.5, 0.0, -2.0, 2.0);
+    pid_init(&gov->fps_pid, 2.0, 0.5, 0.0, -2.0, 2.0);
     pid_init(&gov->latency_pid, 2.0, 0.3, 0.0, -2.0, 2.0);
     
     gov->target_fps = target_fps;
@@ -65,9 +212,39 @@ void pid_governor_init(PIDGovernor *gov, double target_fps, double target_latenc
     gov->iteration = 0;
     gov->max_iterations = max_iterations;
     gov->converged = false;
-    gov->total_layers = TOTAL_LAYERS;
     gov->partition_step_cooldown = 0;
     gov->has_prev = false;
+
+    gov->best_valid = false;
+    gov->best_meets_targets = false;
+    gov->best_estimated_power = 0.0;
+    gov->best_violation = 0.0;
+}
+
+void pid_governor_reset_best(PIDGovernor *gov) {
+    gov->best_valid = false;
+    gov->best_meets_targets = false;
+    gov->best_estimated_power = 0.0;
+    gov->best_violation = 0.0;
+}
+
+bool pid_governor_get_best(const PIDGovernor *gov, PipelineConfig *out_config,
+                           double *out_estimated_power, bool *out_meets_targets) {
+    if (!gov->best_valid) {
+        return false;
+    }
+
+    if (out_config) {
+        *out_config = gov->best_config;
+    }
+    if (out_estimated_power) {
+        *out_estimated_power = gov->best_estimated_power;
+    }
+    if (out_meets_targets) {
+        *out_meets_targets = gov->best_meets_targets;
+    }
+
+    return true;
 }
 
 int get_frequency_index(int freq, processor cpu) {
@@ -86,7 +263,6 @@ int get_frequency_index(int freq, processor cpu) {
         if (freq == table[i]) return i;
     }
     
-    // If not exact match, find closest
     int closest_idx = 0;
     int min_diff = abs(freq - table[0]);
     for (int i = 1; i < num_freqs; i++) {
@@ -155,10 +331,16 @@ void pid_governor_apply_frequency_adjustment(PIDGovernor *gov,
                                              double latency_adjustment,
                                              bool fps_met,
                                              bool latency_met) {
-    double steps = (int) round(fps_adjustment + latency_adjustment);
+
+    double combined_steps = fps_adjustment + latency_adjustment;
+    int steps = (int) round(combined_steps);
+
+    int old_big = config->big_frequency;
+    int old_little = config->little_frequency;
+    int old_big_idx = get_frequency_index(old_big, BIG_CPU);
+    int old_little_idx = get_frequency_index(old_little, LITTLE_CPU);
     
     if (!latency_met) {
-        int old_big = config->big_frequency;
         config->big_frequency = frequency_step(old_big, steps, BIG_CPU);
         if (config->big_frequency == old_big) {
             config->little_frequency = frequency_step(config->little_frequency, steps, LITTLE_CPU);
@@ -171,6 +353,9 @@ void pid_governor_apply_frequency_adjustment(PIDGovernor *gov,
         config->little_frequency = frequency_step(config->little_frequency, steps, LITTLE_CPU);
     }
 
+    int new_big_idx = get_frequency_index(config->big_frequency, BIG_CPU);
+    int new_little_idx = get_frequency_index(config->little_frequency, LITTLE_CPU);
+
     printf("  [freq-adj] combined_steps=%.2f (fps=%.2f + lat=%.2f) | big: idx %d->%d (%d->%d kHz, %+d steps) | little: idx %d->%d (%d->%d kHz, %+d steps)\n",
            combined_steps, fps_adjustment, latency_adjustment,
            old_big_idx, new_big_idx, old_big, config->big_frequency, steps,
@@ -178,8 +363,9 @@ void pid_governor_apply_frequency_adjustment(PIDGovernor *gov,
 }
 
 void pid_governor_adjust_partition_points(PIDGovernor *gov, PipelineConfig *config,
+                                          stats_t *stats,
                                           double fps_margin, double latency_margin,
-                                          bool reduce_power) {
+                                          bool reduce_power, bool force_partition) {
     if (gov->partition_step_cooldown > 0) {
         gov->partition_step_cooldown--;
         return;
@@ -192,36 +378,171 @@ void pid_governor_adjust_partition_points(PIDGovernor *gov, PipelineConfig *conf
         double rel_margin = fmin(fps_margin / gov->target_fps, 
                                   latency_margin / gov->target_latency);
         
-        if (rel_margin > 0.15 && pp2 < gov->total_layers) {
-            config->partition_point2 = (pp2 - 1 < pp1) ? pp1 : pp2 - 1;
-            gov->partition_step_cooldown = 3;
-            printf("[PID] Partition: shifting work from big CPU to little CPU (pp2: %d -> %d)\n", 
-                   pp2, config->partition_point2);
-        } else if (rel_margin > 0.2 && pp1 < pp2 - 1 /* Consider this to avoid a GPU bottleneck where overhead outweights GPU capacity: && pp1 > 2 */) {
-            config->partition_point1 = (pp1 - 1 < 1) ? 1 : pp1 - 1;
+        if (rel_margin > 0.2 && pp1 > 1) {
+            pid_apply_partition_move(config, -1, 0);
             gov->partition_step_cooldown = 3;
             printf("[PID] Partition: shifting work from GPU to big CPU (pp1: %d -> %d)\n", 
                    pp1, config->partition_point1);
-        } 
+        } else if (rel_margin > 0.15 && pp2 > pp1) {
+            pid_apply_partition_move(config, 0, -1);
+            gov->partition_step_cooldown = 3;
+            printf("[PID] Partition: shifting work from big CPU to little CPU (pp2: %d -> %d)\n", 
+                   pp2, config->partition_point2);
+        }
+
+        enforce_no_single_layer_stages(config);
+
     } else {
+
+        if (force_partition && stats) {
+            const double base_power = estimate_power(config);
+
+            double bottleneck_ratio = 0.0;
+            BottleneckStage bottleneck = detect_bottleneck(stats, &bottleneck_ratio);
+            if (bottleneck == BOTTLENECK_NONE) {
+                double s1 = stats->stage1_inference_time;
+                double s2 = stats->stage2_inference_time;
+                double s3 = stats->stage3_inference_time;
+                bottleneck = BOTTLENECK_STAGE1_GPU;
+                if (s2 >= s1 && s2 >= s3) bottleneck = BOTTLENECK_STAGE2_BIG;
+                if (s3 >= s1 && s3 >= s2) bottleneck = BOTTLENECK_STAGE3_LITTLE;
+            }
+
+            PipelineConfig best_help = *config;
+            bool best_help_valid = false;
+            double best_help_delta_power = 0.0;
+
+            PipelineConfig best_any = *config;
+            bool best_any_valid = false;
+            double best_any_delta_power = 0.0;
+
+            PipelineConfig cand;
+            double cand_delta;
+            bool helps;
+
+            if (pp2 < TOTAL_LAYERS) {
+                cand = *config;
+                pid_apply_partition_move(&cand, 0, +1);
+                cand_delta = estimate_power(&cand) - base_power;
+                helps = (bottleneck == BOTTLENECK_STAGE3_LITTLE);
+
+                if (!best_any_valid || cand_delta < best_any_delta_power) {
+                    best_any = cand;
+                    best_any_valid = true;
+                    best_any_delta_power = cand_delta;
+                }
+                if (helps && (!best_help_valid || cand_delta < best_help_delta_power)) {
+                    best_help = cand;
+                    best_help_valid = true;
+                    best_help_delta_power = cand_delta;
+                }
+            }
+
+            if (pp1 < TOTAL_LAYERS && pp2 < TOTAL_LAYERS) {
+                cand = *config;
+                pid_apply_partition_move(&cand, +1, +1);
+                cand_delta = estimate_power(&cand) - base_power;
+                helps = (bottleneck == BOTTLENECK_STAGE3_LITTLE);
+
+                if (!best_any_valid || cand_delta < best_any_delta_power) {
+                    best_any = cand;
+                    best_any_valid = true;
+                    best_any_delta_power = cand_delta;
+                }
+                if (helps && (!best_help_valid || cand_delta < best_help_delta_power)) {
+                    best_help = cand;
+                    best_help_valid = true;
+                    best_help_delta_power = cand_delta;
+                }
+            }
+
+            if (pp1 < TOTAL_LAYERS) {
+                cand = *config;
+                pid_apply_partition_move(&cand, +1, 0);
+                cand_delta = estimate_power(&cand) - base_power;
+                helps = (bottleneck == BOTTLENECK_STAGE2_BIG);
+                if (bottleneck == BOTTLENECK_STAGE3_LITTLE) helps = false;
+                if (bottleneck == BOTTLENECK_STAGE1_GPU) helps = false;
+
+                if (!best_any_valid || cand_delta < best_any_delta_power) {
+                    best_any = cand;
+                    best_any_valid = true;
+                    best_any_delta_power = cand_delta;
+                }
+                if (helps && (!best_help_valid || cand_delta < best_help_delta_power)) {
+                    best_help = cand;
+                    best_help_valid = true;
+                    best_help_delta_power = cand_delta;
+                }
+            }
+
+            if (pp1 > 1) {
+                cand = *config;
+                pid_apply_partition_move(&cand, -1, 0);
+                cand_delta = estimate_power(&cand) - base_power;
+                helps = (bottleneck == BOTTLENECK_STAGE1_GPU);
+                if (bottleneck == BOTTLENECK_STAGE2_BIG) helps = false;
+                if (bottleneck == BOTTLENECK_STAGE3_LITTLE) helps = false;
+
+                if (!best_any_valid || cand_delta < best_any_delta_power) {
+                    best_any = cand;
+                    best_any_valid = true;
+                    best_any_delta_power = cand_delta;
+                }
+                if (helps && (!best_help_valid || cand_delta < best_help_delta_power)) {
+                    best_help = cand;
+                    best_help_valid = true;
+                    best_help_delta_power = cand_delta;
+                }
+            }
+
+            if (!best_help_valid && !best_any_valid) {
+                return;
+            }
+
+            if (best_help_valid) {
+                *config = best_help;
+                enforce_no_single_layer_stages(config);
+                gov->partition_step_cooldown = 3;
+                printf("[PID] Partition: forced change selected (pp1: %d -> %d, pp2: %d -> %d, delta_power=%.3fW, bottleneck=%d, ratio=%.2f)\n",
+                       pp1, config->partition_point1, pp2, config->partition_point2, best_help_delta_power, (int)bottleneck, bottleneck_ratio);
+                return;
+            }
+
+            *config = best_any;
+            enforce_no_single_layer_stages(config);
+            gov->partition_step_cooldown = 3;
+            printf("[PID] Partition: forced change selected (pp1: %d -> %d, pp2: %d -> %d, delta_power=%.3fW, bottleneck=%d, ratio=%.2f)\n",
+                   pp1, config->partition_point1, pp2, config->partition_point2, best_any_delta_power, (int)bottleneck, bottleneck_ratio);
+            return;
+        }
+
         double fps_deficit = -fps_margin / gov->target_fps;
         double lat_deficit = -latency_margin / gov->target_latency;
         double deficit = fmax(fps_deficit, lat_deficit);
-        
-        if (deficit > 0.1) {
-            if (pp2 > pp1 + 1) {
-                config->partition_point2 = (pp2 + 1 > TOTAL_LAYERS) ? TOTAL_LAYERS : pp2 + 1;
-                gov->partition_step_cooldown = 3;
-                printf("[PID] Partition: shifting work from little CPU to big CPU (pp2: %d -> %d)\n", 
-                       pp2, config->partition_point2);
-            } else if (pp1 > 0) {
-                config->partition_point1 = pp1 + 1;
-                config->partition_point2 = pp2 + 1;
-                gov->partition_step_cooldown = 3;
-                printf("[PID] Partition: shifting work from little CPU to GPU (pp1: %d -> %d, pp2: %d -> %d)\n", 
-                       pp1, config->partition_point1, pp2, config->partition_point2);
-            }
+
+        printf("[PID] Partition: changing partition points (fps_deficit: %.2f, lat_deficit: %.2f, deficit: %.2f)\n", 
+               fps_deficit, lat_deficit, deficit);
+
+        if (deficit > 0.2 && pp1 < TOTAL_LAYERS) {
+            //shifting form big to GPU
+            pid_apply_partition_move(config, +1, 0);
+            gov->partition_step_cooldown = 3;
+            printf("[PID] Partition: shifting work from big CPU to GPU (pp1: %d -> %d)\n", 
+                    pp1, config->partition_point1);
+        } else if (deficit > 0.15 && (pp1 < TOTAL_LAYERS || pp2 < TOTAL_LAYERS)) {
+            pid_apply_partition_move(config, +1, +1);
+            gov->partition_step_cooldown = 3;
+            printf("[PID] Partition: shifting work from little CPU to GPU (pp1: %d -> %d, pp2: %d -> %d)\n", 
+                    pp1, config->partition_point1, pp2, config->partition_point2);
+        } else if (deficit > 0.1 && pp2 < TOTAL_LAYERS) {
+            pid_apply_partition_move(config, 0, +1);
+            gov->partition_step_cooldown = 3;
+            printf("[PID] Partition: shifting work from little CPU to big CPU (pp2: %d -> %d)\n", 
+                    pp2, config->partition_point2);
         }
+
+        enforce_no_single_layer_stages(config);
     }
 }
 
@@ -238,24 +559,37 @@ static bool try_reduce_power(PIDGovernor *gov, PipelineConfig *config,
     
     PipelineConfig test_config = *config;
     bool reduced = false;
-    
-    double usable_margin = fmin(margin_fps / gov->target_fps, 
-                                 margin_latency / gov->target_latency);
-    double average_margin = (margin_fps + margin_latency) / 2;
 
-    printf("  [power-reduce] usable_margin=%.1f%% (min of fps/lat margins)\n", usable_margin * 100.0);
+    bool little_at_min = config->little_frequency <= LITTLE_FREQUENCY_TABLE[0];
+    bool big_at_min = config->big_frequency <= BIG_FREQUENCY_TABLE[0];
+
+    BottleneckStage bottleneck = detect_bottleneck(stats, NULL);
+    
+    double rel_fps_margin = margin_fps / gov->target_fps;
+    double rel_lat_margin = margin_latency / gov->target_latency;
+    double usable_margin = fmin(rel_fps_margin, rel_lat_margin);
+    double margin_ratio = (usable_margin > 1e-6) ? fmax(rel_fps_margin, rel_lat_margin) / usable_margin : 0.0;
+    bool margin_imbalanced = (margin_ratio > 3.0 || fmax(rel_fps_margin, rel_lat_margin) > 0.25) && (fmax(rel_fps_margin, rel_lat_margin) > 0.1);
+
+    printf("  [power-reduce] usable_margin=%.1f%% (min of fps=%.1f%%, lat=%.1f%%), ratio=%.1f, imbalanced=%s\n", 
+           usable_margin * 100.0, rel_fps_margin * 100.0, rel_lat_margin * 100.0, 
+           margin_ratio, margin_imbalanced ? "YES" : "NO");
     
     if (usable_margin > 0.05) {
         int big_step = (int)(config->big_frequency * gov->power_reduction_rate);
-        int new_big = snap_to_valid_frequency(config->big_frequency - big_step, BIG_CPU);
+        int requested_big = config->big_frequency - big_step;
+        int new_big = snap_to_valid_frequency(requested_big, BIG_CPU);
         
-        if (new_big < config->big_frequency) {
+        if (!big_at_min && new_big < config->big_frequency) {
             printf("  [power-reduce] margin>5%%: reducing big freq %d -> %d (step=%d)\n",
                    config->big_frequency, new_big, big_step);
             test_config.big_frequency = new_big;
             reduced = true;
+        } else if (big_at_min) {
+            printf("  [power-reduce] margin>5%% but big freq already at minimum %d\n", BIG_FREQUENCY_TABLE[0]);
         } else {
-            printf("  [power-reduce] margin>5%% but big freq already at minimum %d\n", config->big_frequency);
+            printf("  [power-reduce] margin>5%% but big freq not reduced (requested=%d, snapped=%d, step=%d)\n",
+                   requested_big, new_big, big_step);
         }
     } else {
         printf("  [power-reduce] margin<=5%%, skipping big freq reduction\n");
@@ -263,15 +597,19 @@ static bool try_reduce_power(PIDGovernor *gov, PipelineConfig *config,
     
     if (usable_margin > 0.1) {
         int little_step = (int)(config->little_frequency * gov->power_reduction_rate);
-        int new_little = snap_to_valid_frequency(config->little_frequency - little_step, LITTLE_CPU);
+        int requested_little = config->little_frequency - little_step;
+        int new_little = snap_to_valid_frequency(requested_little, LITTLE_CPU);
         
-        if (new_little < config->little_frequency) {
+        if (!little_at_min && new_little < config->little_frequency) {
             printf("  [power-reduce] margin>10%%: reducing little freq %d -> %d (step=%d)\n",
                    config->little_frequency, new_little, little_step);
             test_config.little_frequency = new_little;
             reduced = true;
+        } else if (little_at_min) {
+            printf("  [power-reduce] margin>10%% but little freq already at minimum %d\n", LITTLE_FREQUENCY_TABLE[0]);
         } else {
-            printf("  [power-reduce] margin>10%% but little freq already at minimum %d\n", config->little_frequency);
+            printf("  [power-reduce] margin>10%% but little freq not reduced (requested=%d, snapped=%d, step=%d)\n",
+                   requested_little, new_little, little_step);
         }
     } else {
         printf("  [power-reduce] margin<=10%%, skipping little freq reduction\n");
@@ -279,7 +617,7 @@ static bool try_reduce_power(PIDGovernor *gov, PipelineConfig *config,
     
     if (usable_margin > 0.15) {
         printf("  [power-reduce] margin>15%%: considering partition adjustment\n");
-        pid_governor_adjust_partition_points(gov, &test_config, margin_fps, margin_latency, true);
+        pid_governor_adjust_partition_points(gov, &test_config, stats, margin_fps, margin_latency, true, false);
         if (test_config.partition_point1 != config->partition_point1 ||
             test_config.partition_point2 != config->partition_point2) {
             reduced = true;
@@ -291,6 +629,51 @@ static bool try_reduce_power(PIDGovernor *gov, PipelineConfig *config,
     if (reduced) {
         printf("  [power-reduce] applied reductions to config\n");
         *config = test_config;
+        enforce_no_single_layer_stages(config);
+    } else if (margin_imbalanced) {
+        printf("  [power-reduce] no reductions but margins imbalanced (%.1f%% vs %.1f%%), trying partition rebalance\n",
+               rel_fps_margin * 100.0, rel_lat_margin * 100.0);
+        
+        // Try to rebalance by adjusting partition points to trade excess margin for tighter constraint
+        int pp1 = config->partition_point1;
+        int pp2 = config->partition_point2;
+        
+        if (rel_fps_margin > rel_lat_margin) {
+            // FPS has excess margin, latency is tight -> shift work to slower processors
+            if (pp1 > 1) {
+                pid_apply_partition_move(&test_config, -1, 0);
+                printf("  [power-reduce] rebalance: shifting work from GPU to big (pp1: %d -> %d)\n", 
+                       pp1, test_config.partition_point1);
+                *config = test_config;
+                gov->partition_step_cooldown = 2;
+                return true;
+            } else if (pp2 > pp1) {
+                pid_apply_partition_move(&test_config, 0, -1);
+                printf("  [power-reduce] rebalance: shifting work from big to little (pp2: %d -> %d)\n", 
+                       pp2, test_config.partition_point2);
+                *config = test_config;
+                gov->partition_step_cooldown = 2;
+                return true;
+            }
+        } else {
+            // Latency has excess margin, FPS is tight -> shift work to faster processors
+            if (pp2 < TOTAL_LAYERS) {
+                pid_apply_partition_move(&test_config, 0, +1);
+                printf("  [power-reduce] rebalance: shifting work from little to big (pp2: %d -> %d)\n", 
+                       pp2, test_config.partition_point2);
+                *config = test_config;
+                gov->partition_step_cooldown = 2;
+                return true;
+            } else if (pp1 < TOTAL_LAYERS) {
+                pid_apply_partition_move(&test_config, +1, 0);
+                printf("  [power-reduce] rebalance: shifting work from big to GPU (pp1: %d -> %d)\n", 
+                       pp1, test_config.partition_point1);
+                *config = test_config;
+                gov->partition_step_cooldown = 2;
+                return true;
+            }
+        }
+        printf("  [power-reduce] rebalance: no partition changes possible\n");
     } else {
         printf("  [power-reduce] no reductions possible\n");
     }
@@ -301,9 +684,19 @@ static bool try_reduce_power(PIDGovernor *gov, PipelineConfig *config,
 PIDResult pid_governor_step(PIDGovernor *gov, PipelineConfig *config,
                             stats_t *stats, double *estimated_power) {
     gov->iteration++;
+
+    enforce_no_single_layer_stages(config);
+
+    *estimated_power = estimate_power(config);
+    pid_governor_maybe_update_best(gov, config, stats, *estimated_power);
     
     if (gov->iteration > gov->max_iterations) {
         printf("[PID] MAX_ITERATIONS reached (%d), stopping\n", gov->max_iterations);
+
+        if (gov->best_valid) {
+            *config = gov->best_config;
+            *estimated_power = gov->best_estimated_power;
+        }
         return PID_MAX_ITERATIONS;
     }
     
@@ -335,6 +728,7 @@ PIDResult pid_governor_step(PIDGovernor *gov, PipelineConfig *config,
         if (!reduced) {
             gov->converged = true;
             *estimated_power = estimate_power(config);
+            pid_governor_maybe_update_best(gov, config, stats, *estimated_power);
             printf("[PID] Converged at iteration %d: big_freq=%d, little_freq=%d, pp1=%d, pp2=%d, power=%.3fW\n",
                    gov->iteration, config->big_frequency, config->little_frequency,
                    config->partition_point1, config->partition_point2, *estimated_power);
@@ -385,7 +779,7 @@ PIDResult pid_governor_step(PIDGovernor *gov, PipelineConfig *config,
             pid_reset(&gov->latency_pid);
         }
 
-        if (!both_at_max || latency_worsened) {
+        if (!both_at_max && !latency_worsened) {
             pid_governor_apply_frequency_adjustment(gov, config, fps_adjustment, latency_adjustment, fps_met, latency_met);
         } else {
             gov->partition_step_cooldown = 0;
@@ -393,12 +787,14 @@ PIDResult pid_governor_step(PIDGovernor *gov, PipelineConfig *config,
         
         double fps_margin = stats->fps - gov->target_fps;
         double latency_margin = gov->target_latency - stats->latency;
-        pid_governor_adjust_partition_points(gov, config, fps_margin, latency_margin, false);
+        pid_governor_adjust_partition_points(gov, config, stats, fps_margin, latency_margin, false, both_at_max);
         
         printf("[PID] Adjusting: fps_steps=%.2f, lat_steps=%.2f -> big_freq=%d, little_freq=%d, pp1=%d, pp2=%d\n",
                fps_adjustment, latency_adjustment, config->big_frequency, config->little_frequency,
                config->partition_point1, config->partition_point2);
     }
+
+    enforce_no_single_layer_stages(config);
     
     *estimated_power = estimate_power(config);
     return PID_CONTINUE;

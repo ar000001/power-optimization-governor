@@ -43,6 +43,8 @@ int set_partition_point1(PipelineConfig *config, int partition_point){
         return -1;
     else
         config->partition_point1 = partition_point;
+
+    enforce_no_single_layer_stages(config);
     return 0;
 }
 
@@ -53,6 +55,8 @@ int set_partition_point2(PipelineConfig *config, int partition_point){
         return -1;
     else
         config->partition_point2 = partition_point;
+
+    enforce_no_single_layer_stages(config);
     return 0;
 }
 
@@ -110,12 +114,12 @@ void decrement_frequency(PipelineConfig *config, int freq, processor cpu){
     if (cpu == BIG_CPU){
         for(int i=1; i < NUM_BIG_FREQUENCIES; i++) {
             if (freq == BIG_FREQUENCY_TABLE[i])
-                config->big_frequency = freq;
+                config->big_frequency = BIG_FREQUENCY_TABLE[i-1];
         }
     } else if (cpu == LITTLE_CPU){
         for(int i=1; i < NUM_LITTLE_FREQUENCIES; i++) {
             if (freq == LITTLE_FREQUENCY_TABLE[i])
-                config->little_frequency = freq;
+                config->little_frequency = LITTLE_FREQUENCY_TABLE[i-1];
         }
     }
 }
@@ -136,11 +140,58 @@ bool validate_frequency(int freq, processor cpu){
     return false;
 }
 
+void enforce_no_single_layer_stages(PipelineConfig *config) {
+
+    if (!config) return;
+
+    int pp1_cur = config->partition_point1;
+    int pp2_cur = config->partition_point2;
+
+    if (pp1_cur < 1) pp1_cur = 1;
+    if (pp1_cur > TOTAL_LAYERS) pp1_cur = TOTAL_LAYERS;
+
+    if (pp2_cur < 1) pp2_cur = 1;
+    if (pp2_cur > TOTAL_LAYERS) pp2_cur = TOTAL_LAYERS;
+    if (pp2_cur < pp1_cur) pp2_cur = pp1_cur;
+
+    int best_pp1 = pp1_cur;
+    int best_pp2 = pp2_cur;
+    int best_cost = 1e9;
+
+    for (int pp1 = 1; pp1 <= TOTAL_LAYERS; pp1++) {
+        for (int pp2 = pp1; pp2 <= TOTAL_LAYERS; pp2++) {
+            int s1 = pp1;
+            int s2 = pp2 - pp1;
+            int s3 = TOTAL_LAYERS - pp2;
+
+            if (s1 == 1 || s2 == 1 || s3 == 1) continue;
+
+            int cost = abs(pp1 - pp1_cur) + abs(pp2 - pp2_cur);
+            if (cost < best_cost) {
+                best_cost = cost;
+                best_pp1 = pp1;
+                best_pp2 = pp2;
+            }
+        }
+    }
+
+    config->partition_point1 = best_pp1;
+    config->partition_point2 = best_pp2;
+
+    if (best_pp1 != pp1_cur || best_pp2 != pp2_cur) {
+        int s1 = best_pp1;
+        int s2 = best_pp2 - best_pp1;
+        int s3 = TOTAL_LAYERS - best_pp2;
+        printf("[partition-fix] adjusted partition points to avoid 1-layer stage: pp1=%d->%d pp2=%d->%d (stages=%d,%d,%d)\n",
+               pp1_cur, best_pp1, pp2_cur, best_pp2, s1, s2, s3);
+    }
+}
+
 void calc_partition_sizes(PipelineConfig *config, int total_parts, int *out_g, int *out_b, int *out_l){
     
     int first_stage = config->partition_point1;
     int second_stage = config->partition_point2-first_stage;
-    int third_stage = total_parts - second_stage;
+    int third_stage = total_parts - config->partition_point2;
 
     char first, second, third;
 
